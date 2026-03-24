@@ -100,6 +100,7 @@ class LogTail extends BaseCommand
                 $lastFile = $currentFile;
 
                 if ($currentFile === null || ! file_exists($currentFile)) {
+                    $lastFile = ''; // reset so we re-enter this block next iteration
                     usleep(500_000);
                     continue;
                 }
@@ -122,6 +123,15 @@ class LogTail extends BaseCommand
             }
 
             if ($fileHandle === null) {
+                usleep(500_000);
+                continue;
+            }
+
+            // Guard against file disappearing mid-watch (e.g. log rotation)
+            if (! file_exists($currentFile)) {
+                $lastFile = '';
+                fclose($fileHandle);
+                $fileHandle = null;
                 usleep(500_000);
                 continue;
             }
