@@ -9,14 +9,30 @@
             "email": "brunoggdev@gmail.com"
         }
     ],
+    "require": {},
+    "require-dev": {
+        "codeigniter4/framework": "^4.3",
+        "codeigniter4/devkit": "^1.0"
+    },
     "autoload": {
         "psr-4": {
             "Brunoggdev\\LoggingExtended\\": "src/"
         }
     },
-    "require": {},
-    "require-dev": {
-        "codeigniter4/framework": "^4.3"
+    "autoload-dev": {
+        "psr-4": {
+            "Brunoggdev\\LoggingExtended\\Tests\\": "tests/"
+        }
     },
-    "minimum-stability": "stable"
+    "scripts": {
+        "test": "phpunit",
+        "cs-fix": "php-cs-fixer fix --ansi --verbose --diff"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "phpstan/extension-installer": true
+        }
+    }
 }

@@ -1,0 +1,15 @@
+/.github            export-ignore
+/tests              export-ignore
+/writable           export-ignore
+/vendor             export-ignore
+.editorconfig       export-ignore
+.gitattributes      export-ignore
+.gitignore          export-ignore
+phpunit.xml.dist            export-ignore
+phpunit.xml                 export-ignore
+.php-cs-fixer.dist.php      export-ignore
+.php-cs-fixer.cache         export-ignore
+
+# Use PHP-aware diffs
+*.php  diff=php
+*.phar -diff

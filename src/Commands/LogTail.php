@@ -8,8 +8,6 @@ use CodeIgniter\CLI\BaseCommand;
 use CodeIgniter\CLI\CLI;
 
 /**
- * LogTail — A Laravel Pail-inspired log watcher for CodeIgniter 4
- *
  * Usage:
  *   php spark log:tail
  *   php spark log:tail -level error
@@ -19,17 +17,6 @@ use CodeIgniter\CLI\CLI;
  */
 class LogTail extends BaseCommand
 {
-    protected $group       = 'Logs';
-    protected $name        = 'log:tail';
-    protected $description = 'Tails the CI4 log file in real time, with colorized output.';
-    protected $usage       = 'log:tail [-level <level>] [-filter <text>] [-lines <n>]';
-
-    protected $options = [
-        '-level'  => 'Filter by log level (emergency, alert, critical, error, warning, notice, info, debug).',
-        '-filter' => 'Filter lines containing this text (case-insensitive).',
-        '-lines'  => 'Number of existing lines to show on startup. Default: 20. Use 0 to skip.',
-    ];
-
     /**
      * Maps log levels to CLI colors.
      *
@@ -51,6 +38,16 @@ class LogTail extends BaseCommand
      */
     private const LEVEL_PAD = 9;
 
+    protected $group       = 'Logs';
+    protected $name        = 'log:tail';
+    protected $description = 'Tails the CI4 log file in real time, with colorized output.';
+    protected $usage       = 'log:tail [-level <level>] [-filter <text>] [-lines <n>]';
+    protected $options     = [
+        '-level'  => 'Filter by log level (emergency, alert, critical, error, warning, notice, info, debug).',
+        '-filter' => 'Filter lines containing this text (case-insensitive).',
+        '-lines'  => 'Number of existing lines to show on startup. Default: 20. Use 0 to skip.',
+    ];
+
     public function run(array $params): void
     {
         $levelFilter  = strtolower((string) (CLI::getOption('level') ?? ''));
@@ -61,6 +58,7 @@ class LogTail extends BaseCommand
 
         if ($logPath === null) {
             CLI::error('Log directory not found. Expected: ' . WRITEPATH . 'logs/');
+
             return;
         }
 
@@ -73,13 +71,14 @@ class LogTail extends BaseCommand
 
         // Register a signal handler so Ctrl+C exits cleanly (if PCNTL is available)
         if (function_exists('pcntl_signal')) {
-            pcntl_signal(SIGINT, function () use (&$fileHandle) {
+            pcntl_signal(SIGINT, static function () use (&$fileHandle) {
                 if ($fileHandle) {
                     fclose($fileHandle);
                 }
                 CLI::newLine();
                 CLI::write(CLI::color('  Stopped watching.', 'dark_gray'));
                 CLI::newLine();
+
                 exit(0);
             });
         }
@@ -102,10 +101,11 @@ class LogTail extends BaseCommand
                 if ($currentFile === null || ! file_exists($currentFile)) {
                     $lastFile = ''; // reset so we re-enter this block next iteration
                     usleep(500_000);
+
                     continue;
                 }
 
-                $fileHandle = fopen($currentFile, 'r');
+                $fileHandle = fopen($currentFile, 'rb');
 
                 if (! $booted && $initialLines > 0) {
                     $tail = $this->tailFile($currentFile, $initialLines);
@@ -124,6 +124,7 @@ class LogTail extends BaseCommand
 
             if ($fileHandle === null) {
                 usleep(500_000);
+
                 continue;
             }
 
@@ -133,6 +134,7 @@ class LogTail extends BaseCommand
                 fclose($fileHandle);
                 $fileHandle = null;
                 usleep(500_000);
+
                 continue;
             }
 
@@ -175,6 +177,7 @@ class LogTail extends BaseCommand
             if (str_contains($handler, 'FileHandler')) {
                 $path = $cfg['path'] ?? '';
                 $dir  = rtrim($path !== '' ? $path : WRITEPATH . 'logs', '/') . '/';
+
                 return $dir . 'log-' . date('Y-m-d') . '.log';
             }
         }
@@ -185,7 +188,7 @@ class LogTail extends BaseCommand
     /**
      * Reads the last $n lines of a file efficiently (reverse chunk reading).
      *
-     * @return string[]
+     * @return list<string>
      */
     private function tailFile(string $path, int $n): array
     {
@@ -195,7 +198,7 @@ class LogTail extends BaseCommand
             return [];
         }
 
-        $lines = array_filter($lines, fn($l) => trim($l) !== '<?php');
+        $lines = array_filter($lines, static fn ($l) => trim($l) !== '<?php');
 
         return array_slice($lines, -$n);
     }
@@ -210,6 +213,7 @@ class LogTail extends BaseCommand
         if (! preg_match('/^(\w+)\s+-\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+-->\s+(.+)$/s', $line, $m)) {
             // Multiline continuation — print dimmed
             CLI::write(CLI::color('  ' . $line, 'dark_gray'));
+
             return;
         }
 
@@ -242,7 +246,7 @@ class LogTail extends BaseCommand
             CLI::color($levelLabel, $color),
             CLI::color($datetime, 'dark_gray'),
             $mainMsg,
-            $contextDisplay
+            $contextDisplay,
         ));
     }
 

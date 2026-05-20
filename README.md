@@ -5,7 +5,7 @@ Extended logging for CodeIgniter 4 — part of the `ci4-*-extended` series.
 Two things in one package:
 
 1. **`php spark log:tail`** — Watch your log file in real time with colorized, filtered output.
-2. **Context arrays actually work** — CI4's native logger silently drops any context keys that don't have a matching `{placeholder}` in the message. This package fixes that by appending leftover keys as `key=value` pairs automatically.
+2. **Richer context serialization** — CI4's native logger follows the PSR-3 spec strictly: context keys without a matching `{placeholder}` in the message are silently discarded. This package extends that behavior by appending leftover keys as `key=value` pairs automatically.
 
 ---
 
@@ -67,9 +67,9 @@ public static function logger(bool $getShared = true)
 }
 ```
 
-Before this package, passing a context array without matching placeholders was silently discarded:
+PSR-3 only interpolates context keys that have a matching `{placeholder}` in the message — everything else is discarded by design. With the extended logger, leftover keys are appended automatically:
 ```php
-// ❌ Native CI4 — context is dropped, you only see "copyProducts failed"
+// Native CI4 (PSR-3 strict) — context is discarded, you only see "copyProducts failed"
 log_message('error', 'copyProducts failed', [
     'source' => $sourceId,
     'target' => $targetId,
@@ -77,7 +77,7 @@ log_message('error', 'copyProducts failed', [
 ]);
 ```
 
-After wiring the extended logger, the same call produces:
+With the extended logger wired in, the same call produces:
 ```
 ERROR - 2026-03-20 14:32:01 --> copyProducts failed | source=42 target=99 error="Division by zero"
 ```
@@ -91,6 +91,39 @@ logger()->error('Job {job} failed on attempt {attempt}', [
 ]);
 // ERROR - ... --> Job SendEmail failed on attempt 3 | user_id=99
 ```
+
+### Logging exceptions
+
+The extended logger adds an `exception()` method that formats a `Throwable` into a clean log entry:
+
+```php
+try {
+    // ...
+} catch (Throwable $e) {
+    logger()->exception($e);            // defaults to 'error' level
+    logger()->exception($e, 'warning'); // or any PSR-3 level
+}
+// ERROR - ... --> [RuntimeException] Something went wrong
+```
+
+Need to also send exceptions to an external tracker (Sentry, GlitchTip, etc.)? Extend the logger and override `exception()` — calling `parent::` keeps the file log entry:
+
+```php
+use Brunoggdev\LoggingExtended\Logger;
+
+class GlitchTipLogger extends Logger
+{
+    public function exception(Throwable $e, string $level = 'error'): void
+    {
+        \Sentry\captureException($e);
+        parent::exception($e, $level);
+    }
+}
+```
+
+Then wire your subclass in `app/Config/Services.php` instead of the base one.
+
+---
 
 ### Using a custom Logger subclass?
 

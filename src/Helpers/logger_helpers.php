@@ -1,6 +1,6 @@
 <?php
 
-use CodeIgniter\Log\Logger;
+use Brunoggdev\LoggingExtended\Logger;
 
 if (! function_exists('logger')) {
     /**
