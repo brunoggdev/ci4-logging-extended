@@ -38,7 +38,7 @@ class LogTail extends BaseCommand
      */
     private const LEVEL_PAD = 9;
 
-    protected $group       = 'Logs';
+    protected $group       = 'LoggingExtended';
     protected $name        = 'log:tail';
     protected $description = 'Tails the CI4 log file in real time, with colorized output.';
     protected $usage       = 'log:tail [-level <level>] [-filter <text>] [-lines <n>]';

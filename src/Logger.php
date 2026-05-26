@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Brunoggdev\LoggingExtended;
 
+use Brunoggdev\LoggingExtended\Config\LoggingExtended;
 use CodeIgniter\Log\Logger as CI4Logger;
 use Throwable;
 
@@ -22,17 +23,150 @@ use Throwable;
 class Logger extends CI4Logger
 {
     /**
-     * Convenience method to log a Throwable as a structured entry.
-     * Override in a subclass to add custom behavior (e.g. sending to an
-     * external error tracker) while keeping file logging via parent::exception().
+     * Logs a caught Throwable with rich context: location, request, user, trace.
+     *
+     * Behaviour is driven by Config\LoggingExtended. Override this method in a
+     * subclass to add external integrations (Sentry, Bugsnag, etc.) while
+     * keeping file logging via parent::exception().
+     *
+     * @param string|null $message Optional message when the call site has more context than
+     *                             the exception message itself (e.g. 'Failed to process order').
+     *                             Defaults to the exception's own message.
      */
-    public function exception(Throwable $e, string $level = 'error'): void
+    public function exception(Throwable $e, string $level = 'error', ?string $message = null): void
     {
-        $this->log($level, '[{class}] {message}', [
-            'exception' => $e,
-            'class'     => $e::class,
-            'message'   => $e->getMessage(),
-        ]);
+        /** @var LoggingExtended $config */
+        $config = config('LoggingExtended');
+
+        $context = $this->buildExceptionContext($e, $config);
+
+        if ($message !== null) {
+            // Custom message is the log line — don't leak the exception's message into context
+            unset($context['message']);
+        }
+
+        $this->log($level, '[{class}] ' . ($message ?? '{message}'), $context);
+    }
+
+    /**
+     * Builds the full context array for an exception log entry.
+     * Separated so subclasses can call it when extending exception().
+     */
+    protected function buildExceptionContext(Throwable $e, LoggingExtended $config): array
+    {
+        $ex = $config->exception;
+
+        $context = [
+            'class'    => $e::class,
+            'message'  => $e->getMessage(),
+            'location' => $e->getFile() . ':' . $e->getLine(),
+        ];
+
+        if ($ex['request'] && ! is_cli()) {
+            $request = service('request');
+            $context['request'] = [
+                'method' => $request->getMethod(),
+                'url'    => current_url(),
+            ];
+
+            if ($ex['params']) {
+                $params = [];
+                $get    = $request->getGet() ?: [];
+                $post   = $request->getPost() ?: [];
+                $json   = (array) ($request->getJSON(true) ?: []);
+
+                if ($get !== []) {
+                    $params['query'] = $this->redactParams($get, $ex['redact']);
+                }
+
+                if ($post !== []) {
+                    $params['body'] = $this->redactParams($post, $ex['redact']);
+                } elseif ($json !== []) {
+                    $params['body'] = $this->redactParams($json, $ex['redact']);
+                }
+
+                if ($params !== []) {
+                    $context['params'] = $params;
+                }
+            }
+
+            if ($ex['headers']) {
+                $headers = [];
+
+                foreach ($request->getHeaders() as $name => $header) {
+                    $headers[$name] = is_array($header)
+                        ? implode(', ', array_map(fn ($h) => $h->getValueLine(), $header))
+                        : $header->getValueLine();
+                }
+
+                $context['headers'] = $this->redactParams($headers, $ex['redact']);
+            }
+        }
+
+        if (is_callable($ex['user'])) {
+            try {
+                $user = ($ex['user'])();
+                if ($user !== null) {
+                    $context['user'] = $user;
+                }
+            } catch (Throwable) {
+                // Resolver threw — skip rather than crashing the logger itself
+            }
+        }
+
+        if ($ex['session'] === true && ! is_cli()) {
+            // Guard: session() is not available in CLI contexts
+            try {
+                $context['session'] = session()->get();
+            } catch (Throwable) {
+                // Session unavailable — skip
+            }
+        } elseif (is_callable($ex['session'])) {
+            try {
+                $session = ($ex['session'])();
+                if ($session !== null) {
+                    $context['session'] = $session;
+                }
+            } catch (Throwable) {
+                // Resolver threw — skip rather than crashing the logger itself
+            }
+        }
+
+        foreach ($ex['context'] as $key => $resolver) {
+            try {
+                $value = $resolver();
+                if ($value !== null) {
+                    $context[$key] = $value;
+                }
+            } catch (Throwable) {
+                // Resolver threw — skip rather than crashing the logger itself
+            }
+        }
+
+        if ($ex['trace']) {
+            $context['trace'] = $e->getTraceAsString();
+        }
+
+        return $context;
+    }
+
+    /**
+     * Recursively redacts sensitive keys from a params array.
+     * Matching is case-insensitive and applies to nested arrays (e.g. JSON bodies).
+     *
+     * Protected so subclasses that override buildExceptionContext() can reuse this.
+     */
+    protected function redactParams(array $params, array $redactedKeys): array
+    {
+        $lower = array_map('strtolower', $redactedKeys);
+
+        array_walk_recursive($params, static function (mixed &$val, string|int $key) use ($lower): void {
+            if (in_array(strtolower((string) $key), $lower, true)) {
+                $val = '[REDACTED]';
+            }
+        });
+
+        return $params;
     }
 
     /**
@@ -69,8 +203,15 @@ class Logger extends CI4Logger
         }
 
         $parts = [];
+        $trace = null;
 
         foreach ($extras as $key => $val) {
+            // Trace goes on its own lines, not inline
+            if ($key === 'trace' && is_string($val)) {
+                $trace = $val;
+                continue;
+            }
+
             if (null === $val) {
                 $parts[] = $key . '=null';
             } elseif (is_bool($val)) {
@@ -84,6 +225,12 @@ class Logger extends CI4Logger
             }
         }
 
-        return $message . ' | ' . implode(' ', $parts);
+        $result = empty($parts) ? $message : $message . ' | ' . implode(' ', $parts);
+
+        if ($trace !== null) {
+            $result .= PHP_EOL . $trace;
+        }
+
+        return $result;
     }
 }

@@ -54,6 +54,21 @@ final class LoggerTest extends CIUnitTestCase
         return end($lines);
     }
 
+    /**
+     * Returns the first main log line (the one containing '-->').
+     * Used for exception() tests where trace lines follow the main entry.
+     */
+    private function mainLogLine(): string
+    {
+        foreach (explode("\n", file_get_contents($this->logFile)) as $line) {
+            if (str_contains($line, ' --> ')) {
+                return trim($line);
+            }
+        }
+
+        return '';
+    }
+
     public function testPlainMessageWithNoContext(): void
     {
         $this->logger->info('Plain message');
@@ -121,7 +136,7 @@ final class LoggerTest extends CIUnitTestCase
         $e = new RuntimeException('Something exploded');
         $this->logger->exception($e);
 
-        $line = $this->lastLogLine();
+        $line = $this->mainLogLine();
         $this->assertStringContainsString('[RuntimeException]', $line);
         $this->assertStringContainsString('Something exploded', $line);
     }
@@ -131,7 +146,7 @@ final class LoggerTest extends CIUnitTestCase
         $e = new RuntimeException('Low severity');
         $this->logger->exception($e, 'warning');
 
-        $this->assertStringContainsString('WARNING', $this->lastLogLine());
+        $this->assertStringContainsString('WARNING', $this->mainLogLine());
     }
 
     public function testExceptionObjectIsNotLeakedIntoOutput(): void
@@ -142,5 +157,171 @@ final class LoggerTest extends CIUnitTestCase
         $line = $this->lastLogLine();
         $this->assertStringNotContainsString('exception=', $line);
         $this->assertStringNotContainsString('RuntimeException Object', $line);
+    }
+
+    public function testExceptionLogsLocationAsFileColonLine(): void
+    {
+        $e = new RuntimeException('Location test');
+        $this->logger->exception($e);
+
+        $line = $this->mainLogLine();
+        $this->assertMatchesRegularExpression('/location=.+:\d+/', $line);
+    }
+
+    public function testExceptionCustomMessageOverridesExceptionMessage(): void
+    {
+        $e = new RuntimeException('Original exception message');
+        $this->logger->exception($e, 'error', 'Custom call-site message');
+
+        $line = $this->mainLogLine();
+        $this->assertStringContainsString('Custom call-site message', $line);
+        $this->assertStringNotContainsString('Original exception message', $line);
+    }
+
+    public function testExceptionWithCustomLevelWritesThatLevel(): void
+    {
+        $e = new RuntimeException('Critical issue');
+        $this->logger->exception($e, 'critical');
+
+        $this->assertStringContainsString('CRITICAL', $this->mainLogLine());
+    }
+
+    public function testExceptionWithUserCallableLogsUserData(): void
+    {
+        $config                     = config('LoggingExtended');
+        $config->exception['user']  = fn () => ['id' => 42, 'email' => 'user@example.com'];
+        $config->exception['trace'] = false;
+
+        $e = new RuntimeException('With user');
+        $this->logger->exception($e);
+
+        $line = $this->lastLogLine();
+        $this->assertStringContainsString('"id":42', $line);
+        $this->assertStringContainsString('"email":"user@example.com"', $line);
+    }
+
+    public function testExceptionUserCallableReturningNullOmitsUserKey(): void
+    {
+        $config                     = config('LoggingExtended');
+        $config->exception['user']  = fn () => null;
+        $config->exception['trace'] = false;
+
+        $e = new RuntimeException('No user');
+        $this->logger->exception($e);
+
+        $line = $this->lastLogLine();
+        $this->assertStringNotContainsString('user=', $line);
+    }
+
+    public function testExceptionWithContextArrayResolvesEachKey(): void
+    {
+        $config                      = config('LoggingExtended');
+        $config->exception['trace']  = false;
+        $config->exception['context'] = [
+            'tenant' => fn () => 'acme',
+            'region' => fn () => 'us-east-1',
+        ];
+
+        $e = new RuntimeException('With context');
+        $this->logger->exception($e);
+
+        $line = $this->lastLogLine();
+        $this->assertStringContainsString('tenant=acme', $line);
+        $this->assertStringContainsString('region=us-east-1', $line);
+    }
+
+    public function testExceptionContextResolverReturningNullOmitsKey(): void
+    {
+        $config                       = config('LoggingExtended');
+        $config->exception['trace']   = false;
+        $config->exception['context'] = [
+            'nullable' => fn () => null,
+        ];
+
+        $e = new RuntimeException('Null context');
+        $this->logger->exception($e);
+
+        $this->assertStringNotContainsString('nullable=', $this->lastLogLine());
+    }
+
+    public function testExceptionWithTraceFalseOmitsStacktraceLines(): void
+    {
+        $config                     = config('LoggingExtended');
+        $config->exception['trace'] = false;
+
+        $e = new RuntimeException('No trace');
+        $this->logger->exception($e);
+
+        $content = file_get_contents($this->logFile);
+        $this->assertStringNotContainsString('#0 ', $content);
+        $this->assertStringNotContainsString('#1 ', $content);
+    }
+
+    public function testExceptionWithTraceDefaultIncludesStacktrace(): void
+    {
+        $config                     = config('LoggingExtended');
+        $config->exception['trace'] = true;
+
+        $e = new RuntimeException('With trace');
+        $this->logger->exception($e);
+
+        $content = file_get_contents($this->logFile);
+        $this->assertStringContainsString('#0 ', $content);
+    }
+
+    public function testExceptionWithSessionTrueDoesNotCrash(): void
+    {
+        $config                       = config('LoggingExtended');
+        $config->exception['trace']   = false;
+        $config->exception['session'] = true;
+
+        $e = new RuntimeException('Session test');
+
+        // Session may not be available in CLI test env; just verify no crash
+        try {
+            $this->logger->exception($e);
+            $this->assertStringContainsString('[RuntimeException]', $this->lastLogLine());
+        } catch (\Throwable $thrown) {
+            // If session truly unavailable, a specific SessionException is acceptable;
+            // any other unexpected exception should re-fail the test.
+            $this->assertStringContainsString('Session', $thrown::class);
+        }
+    }
+
+    public function testRedactParamsReplacesPasswordWithRedactedMarker(): void
+    {
+        // redactParams() is private; access it via Closure binding against the
+        // already-constructed logger instance so we reuse the setUp config.
+        $redact = \Closure::bind(
+            fn (array $params, array $keys) => $this->redactParams($params, $keys),
+            $this->logger,
+            Logger::class,
+        );
+
+        $redacted = $redact(
+            ['username' => 'john', 'password' => 'hunter2', 'nested' => ['token' => 'abc123']],
+            ['password', 'token'],
+        );
+
+        $this->assertSame('[REDACTED]', $redacted['password']);
+        $this->assertSame('[REDACTED]', $redacted['nested']['token']);
+        $this->assertSame('john', $redacted['username']);
+    }
+
+    public function testRedactParamsIsCaseInsensitive(): void
+    {
+        $redact = \Closure::bind(
+            fn (array $params, array $keys) => $this->redactParams($params, $keys),
+            $this->logger,
+            Logger::class,
+        );
+
+        $redacted = $redact(
+            ['PASSWORD' => 'hunter2', 'Api_Key' => 'secret'],
+            ['password', 'api_key'],
+        );
+
+        $this->assertSame('[REDACTED]', $redacted['PASSWORD']);
+        $this->assertSame('[REDACTED]', $redacted['Api_Key']);
     }
 }
