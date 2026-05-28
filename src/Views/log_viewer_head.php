@@ -4,18 +4,33 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= isset($filename) ? esc($filename) . ' — ' : '' ?>Log Viewer</title>
+    <link id="bs-css" rel="stylesheet">
+    <link id="bs-icons" rel="stylesheet">
     <script>
     (function () {
         var BSW_KEY   = 'lv-bootswatch';
         var THEME_KEY = 'lv-theme';
-        var bsw   = localStorage.getItem(BSW_KEY) || 'flatly';
+        var bsw   = localStorage.getItem(BSW_KEY)   || 'flatly';
         var theme = localStorage.getItem(THEME_KEY) ||
                     (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         document.documentElement.setAttribute('data-bs-theme', theme);
-        document.write('<link id="bs-css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.8/dist/' + bsw + '/bootstrap.min.css">');
+
+        var bsCss   = document.getElementById('bs-css');
+        var bsIcons = document.getElementById('bs-icons');
+
+        bsCss.onerror = function () {
+            this.onerror = null;
+            this.href = 'https://unpkg.com/bootswatch@5.3.8/dist/' + bsw + '/bootstrap.min.css';
+        };
+        bsCss.href = 'https://cdn.jsdelivr.net/npm/bootswatch@5.3.8/dist/' + bsw + '/bootstrap.min.css';
+
+        bsIcons.onerror = function () {
+            this.onerror = null;
+            this.href = 'https://unpkg.com/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css';
+        };
+        bsIcons.href = 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css';
     }());
     </script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
         /* ── Context pills ─────────────────────────────────────────────────── */
         .ctx-pill {
@@ -29,6 +44,31 @@
             font-size: .75rem;
             font-family: 'SFMono-Regular', Consolas, monospace;
             white-space: nowrap;
+        }
+        .ctx-expand-body {
+            max-height: 8rem;
+            overflow-y: auto;
+            margin-top: .375rem;
+            border-left: 2px solid var(--bs-border-color);
+            border-radius: 0 .25rem .25rem 0;
+            font-size: .75rem;
+            font-family: 'SFMono-Regular', Consolas, monospace;
+        }
+        .ctx-expand-body table { border-collapse: collapse; width: 100%; }
+        .ctx-expand-body tr + tr { border-top: 1px solid var(--bs-border-color); }
+        .ctx-row-key {
+            white-space: nowrap;
+            padding: .15rem .6rem .15rem .5rem;
+            opacity: .7;
+            vertical-align: top;
+            background: rgba(var(--bs-secondary-rgb), .07);
+            border-right: 1px solid var(--bs-border-color);
+        }
+        .ctx-row-val {
+            padding: .15rem .5rem;
+            color: var(--bs-primary);
+            vertical-align: top;
+            word-break: break-all;
         }
 
         /* ── Stacktrace ────────────────────────────────────────────────────── */

@@ -185,11 +185,13 @@ class LogViewerService
                 : (bool) $result;
         }
 
-        // Text / regex across message + all context values
+        // Text / regex across message + all context key=value pairs
         $haystack = $entry['message'];
 
-        foreach ($entry['context'] as $val) {
-            $haystack .= ' ' . (is_array($val) ? json_encode($val) : $val);
+        foreach ($entry['context'] as $key => $val) {
+            $haystack .= is_array($val)
+                ? ' ' . json_encode($val)
+                : ' ' . $key . '=' . $val;
         }
 
         $result = @preg_match('/' . $term . '/i', $haystack);
@@ -313,30 +315,129 @@ class LogViewerService
     }
 
     /**
-     * Parses key=value and key="quoted value" pairs from a context string.
-     * JSON object/array values are decoded into arrays for dot-notation search support.
-     *
-     * Note: the unquoted value pattern `[^\s]+` stops at the first space, so unquoted
-     * values containing spaces will be truncated. Values with spaces must be quoted
-     * at write time (interpolate() already does this for scalar strings containing spaces).
+     * Parses key=value pairs from a context string into an associative array.
+     * Handles quoted strings, JSON objects/arrays (with depth tracking), and plain scalars.
+     * JSON values are decoded into arrays for dot-notation search support.
      *
      * @return array<string,mixed>
      */
     private function parseContext(string $str): array
     {
         $context = [];
+        $i       = 0;
+        $len     = strlen($str);
 
-        preg_match_all('/(\w+)=("(?:[^"\\\\]|\\\\.)*"|[^\s]+)/', $str, $matches, PREG_SET_ORDER);
+        while ($i < $len) {
+            while ($i < $len && ctype_space($str[$i])) {
+                $i++;
+            }
 
-        foreach ($matches as $match) {
-            $val     = trim($match[2], '"');
-            $decoded = json_decode($val, true);
-            $context[$match[1]] = (json_last_error() === JSON_ERROR_NONE && is_array($decoded))
+            if ($i >= $len) {
+                break;
+            }
+
+            $key = '';
+
+            while ($i < $len && (ctype_alnum($str[$i]) || $str[$i] === '_')) {
+                $key .= $str[$i++];
+            }
+
+            if ($key === '' || $i >= $len || $str[$i] !== '=') {
+                break;
+            }
+
+            $i++;
+
+            if ($i >= $len) {
+                break;
+            }
+
+            $val = match ($str[$i]) {
+                '"'      => $this->readQuoted($str, $i, $len),
+                '{', '[' => $this->readJson($str, $i, $len),
+                default  => $this->readPlain($str, $i, $len),
+            };
+
+            $decoded       = json_decode($val, true);
+            $context[$key] = (json_last_error() === JSON_ERROR_NONE && is_array($decoded))
                 ? $decoded
-                : $val;
+                : trim($val, '"');
         }
 
         return $context;
+    }
+
+    private function readQuoted(string $str, int &$i, int $len): string
+    {
+        $val = '"';
+        $i++;
+
+        while ($i < $len) {
+            if ($str[$i] === '\\' && $i + 1 < $len) {
+                $val .= $str[$i] . $str[$i + 1];
+                $i   += 2;
+                continue;
+            }
+
+            $val .= $str[$i];
+
+            if ($str[$i++] === '"') {
+                break;
+            }
+        }
+
+        return $val;
+    }
+
+    private function readJson(string $str, int &$i, int $len): string
+    {
+        $open  = $str[$i] === '{' ? '{' : '[';
+        $close = $str[$i] === '{' ? '}' : ']';
+        $depth = 0;
+        $val   = '';
+        $inStr = false;
+
+        while ($i < $len) {
+            $ch = $str[$i];
+
+            if ($inStr) {
+                if ($ch === '\\' && $i + 1 < $len) {
+                    $val .= $ch . $str[$i + 1];
+                    $i   += 2;
+                    continue;
+                }
+
+                if ($ch === '"') {
+                    $inStr = false;
+                }
+            } else {
+                if ($ch === '"') {
+                    $inStr = true;
+                } elseif ($ch === $open) {
+                    $depth++;
+                } elseif ($ch === $close && --$depth === 0) {
+                    $val .= $ch;
+                    $i++;
+                    break;
+                }
+            }
+
+            $val .= $ch;
+            $i++;
+        }
+
+        return $val;
+    }
+
+    private function readPlain(string $str, int &$i, int $len): string
+    {
+        $val = '';
+
+        while ($i < $len && ! ctype_space($str[$i])) {
+            $val .= $str[$i++];
+        }
+
+        return $val;
     }
 
     private function formatSize(int $bytes): string

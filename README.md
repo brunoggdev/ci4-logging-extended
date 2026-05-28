@@ -2,6 +2,10 @@
 
 Extended logging for CodeIgniter 4 — part of the [`ci4-*-extended`](https://github.com/brunoggdev) series.
 
+**No database. No migrations. No new infrastructure. No new conventions to learn.** 
+
+This package enhances CI4's native logging capabilities **without getting in your way** — every existing `log_message()` and `logger()->*()` call in your app works automatically from the moment you install it. No finicky or complex configurations, **it just works**.
+
 Three things in one package:
 
 1. **Context serialization** — CI4's native logger silently discards context keys that have no matching `{placeholder}`. The extended logger appends them automatically as structured `key=value` pairs.
@@ -16,13 +20,18 @@ Three things in one package:
 composer require brunoggdev/ci4-logging-extended
 ```
 
-That's it. The package auto-registers the extended logger via its `Services` config — every `log_message()` and `logger()->*()` call in your app will use it automatically.
-
-To customize behavior (Log Viewer gate, exception context, deep links), publish the config:
+That's it. The package auto-registers via its `Services` config — no setup required. To customize behavior (Log Viewer gate, exception context, deep links), publish the config:
 
 ```bash
 php spark logging-extended:publish
 ```
+
+>💡**Tip:** since config values are returned from methods, `env()` works anywhere in your config. There's no forced convention, but `LE_` is a natural prefix if you want one:
+> ```php
+> 'enabled'   => (bool) env('LE_VIEWER_ENABLED', true),
+> 'wslDistro' => env('LE_WSL_DISTRO'),
+> 'perPage'   => (int) env('LE_PER_PAGE', 50),
+> ```
 
 ---
 
@@ -96,32 +105,30 @@ ERROR - 2026-03-20 14:32:01 --> [RuntimeException] Failed to process order #99 |
 
 ### Configuration
 
-Publish the config (`php spark logging-extended:publish`) and edit `app/Config/LoggingExtended.php`:
+Publish the config (`php spark logging-extended:publish`) and edit `app/Config/LoggingExtended.php`. Everything lives in the `exception()` method — modify what you need:
 
 ```php
-public array $exception = [
-    'trace'   => true,      // include full stack trace
-    'request' => true,      // log method + URL
-    'params'  => false,     // GET/POST/JSON body — off by default (privacy)
-    'headers' => false,     // request headers — off by default (may expose tokens)
-    'redact'  => [          // keys redacted from params and headers (case-insensitive, recursive)
-        'password', 'token', 'api_key', 'authorization', 'credit_card', ...
-    ],
-    'user'    => null,      // callable returning user data
-    'session' => false,     // true = all session data; callable for filtered keys
-    'context' => [],        // ['label' => callable] for custom context
-];
-```
-
-Set your values in the constructor **before** calling `parent::__construct()`:
-
-```php
-public function __construct()
+protected function exception(): array
 {
-    $this->exception['user']    = fn () => ['id' => auth()->id(), 'email' => auth()->user()?->email];
-    $this->exception['context'] = ['tenant' => fn () => session('tenant_id')];
-
-    parent::__construct(); // applies defaults and validates — keep at the bottom
+    return [
+        'trace'   => true,
+        'request' => [
+            'enabled' => true,
+            'params'  => false,     // GET/POST/JSON body — off by default (privacy)
+            'headers' => false,     // true = all headers; array of names = allow-list; false = off
+            'redact'  => ['password', 'token', 'api_key', 'authorization', 'cookie', ...],
+        ],
+        'context' => [
+            'user'    => fn () => ['id' => auth()->id(), 'email' => auth()->user()?->email],
+            'session' => false,     // true = all session data; callable for specific keys
+            'extra'   => ['tenant' => fn () => session('tenant_id')],
+        ],
+        'alerts'  => [
+            'handlers' => [SlackAlertHandler::class],
+            'levels'   => ['critical', 'error'],
+            'throttle' => 15 * MINUTE,
+        ],
+    ];
 }
 ```
 
@@ -157,6 +164,28 @@ class SentryLogger extends Logger
 
 Wire your subclass in `app/Config/Services.php` instead of the base logger. The `buildExceptionContext()` method is also `protected` — override it to add fields without replacing the whole method.
 
+### Alert handlers
+
+Handlers are notified after each matching log entry is written to file — useful for Slack notifications, PagerDuty, custom webhooks, etc. Configure them in the `alerts` key of your `exception()` method.
+
+A handler can be a closure, an invokable class, or any class with a `handle(LogAlert $alert): void` method:
+
+```php
+class SlackAlertHandler
+{
+    public function handle(LogAlert $alert): void
+    {
+        Http::post(env('SLACK_WEBHOOK'), [
+            'text' => "[{$alert->level}] {$alert->message}",
+        ]);
+    }
+}
+```
+
+`LogAlert` carries `level`, `message`, `context`, and `timestamp`. A broken handler never takes down the logger — all calls are wrapped in try/catch and the file log is always written first.
+
+`throttle` accepts any duration using CI4's time constants (`15 * MINUTE`, `2 * HOUR`, etc.) and uses an isolated file cache — never touches your app's cache store — to suppress repeat alerts for the same level + message within that window.
+
 ---
 
 ## Log Viewer
@@ -181,23 +210,41 @@ A web UI for browsing your daily log files, with multiple themes to choose from 
 
 ### Setup
 
-The viewer is enabled by default on developmentin your published config. Set the `gate` to control who can access it:
+The viewer is enabled by default in your published config. Set the `gate` in your `viewer()` method to control who can access it:
 
 ```php
-$this->viewer['gate'] = fn () => auth()->loggedIn() && auth()->user()->isAdmin();
+protected function viewer(): array
+{
+    return [
+        // ...
+        'gate' => fn () => auth()->loggedIn() && auth()->user()->isAdmin(),
+        // or: 'gate' => self::GATE_LOGIN,
+    ];
+}
 ```
 
-By default the gate allows access only in the `development` environment and denies (404) everywhere else.
+Using `self::GATE_LOGIN` activates the built-in login page — run `php spark log-viewer:set-password` to set the password (stored as a bcrypt hash in `.env`).
+
+By default (before publishing) the gate allows access only in the `development` environment and denies with 404 everywhere else.
+
+You can also require existing CI4 filters before the gate fires — useful if you have an existing auth filter:
+
+```php
+'routes' => [
+    'path'    => 'logs',
+    'filters' => ['auth'],  // CI4 filter aliases applied before the gate
+],
+```
 
 ### Accessing the viewer
 
-The viewer mounts at `/logs` by default. Change `routesPath` to move it:
+The viewer mounts at `/logs` by default. Change `routes.path` in your `viewer()` method to move it:
 
 ```php
-public array $viewer = [
-    'routesPath' => 'devtools/logs',
-    // ...
-];
+'routes' => [
+    'path'    => 'devtools/logs',
+    'filters' => [],
+],
 ```
 
 ### Filtering and search
@@ -229,28 +276,27 @@ Stack frame file paths in the viewer link directly to your IDE. Configure the `d
 
 When `serverPath` and `localPath` are both set, links are rewritten from the server path to your local path. This covers Docker, VM, and WSL setups where file paths in logs differ from your local filesystem.
 
-Tip: use `env()` for any of these if your team has mixed environments (WSL / native Linux / Mac):
-
-```php
-'wslDistro' => env('WSL_DISTRO_NAME'),
-'localPath'  => env('LOG_LOCAL_PATH', '/home/user/projects/app/'),
-```
-
 ### Viewer configuration reference
 
 ```php
-public array $viewer = [
-    'enabled'    => true,       // false = completely hide the viewer and its routes
-    'routesPath' => 'logs',     // URL path where the viewer is accessible
-    'gate'       => null,       // callable returning bool; null = deny (404). Defaults to development-only.
-    'deeplink'   => [
-        'ide'        => 'vscode',   // 'vscode', 'phpstorm', or null
-        'wslDistro'  => null,       // WSL distro name (VSCode only)
-        'serverPath' => null,       // server-side path prefix to rewrite
-        'localPath'  => null,       // local path equivalent
-    ],
-    'perPage'    => 50,         // entries per page
-];
+protected function viewer(): array
+{
+    return [
+        'enabled'  => true,         // false = completely hide the viewer and its routes
+        'gate'     => null,         // null = deny (404); GATE_LOGIN = built-in login; callable = custom
+        'routes'   => [
+            'path'    => 'logs',    // URL path where the viewer is accessible
+            'filters' => [],        // CI4 filter aliases applied before the gate
+        ],
+        'deeplink' => [
+            'ide'        => 'vscode',   // 'vscode', 'phpstorm', or null
+            'wslDistro'  => null,       // WSL distro name (VSCode only)
+            'serverPath' => null,       // server-side path prefix to rewrite
+            'localPath'  => null,       // local path equivalent
+        ],
+        'perPage'  => 50,           // entries per page
+    ];
+}
 ```
 
 ---

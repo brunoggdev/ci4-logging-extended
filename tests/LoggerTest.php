@@ -45,6 +45,20 @@ final class LoggerTest extends CIUnitTestCase
         if (file_exists($this->logFile)) {
             unlink($this->logFile);
         }
+
+        // Clear alert throttle cache files so throttle tests don't bleed across runs.
+        $cacheDir = WRITEPATH . 'cache/log_alerts/';
+        if (is_dir($cacheDir)) {
+            foreach (glob($cacheDir . '*') ?: [] as $file) {
+                if (is_file($file)) {
+                    unlink($file);
+                }
+            }
+        }
+
+        // Reset the static cache instance so the next test starts fresh.
+        $ref = new \ReflectionProperty(\Brunoggdev\LoggingExtended\Logger::class, 'alertCache');
+        $ref->setValue(null, null);
     }
 
     private function lastLogLine(): string
@@ -188,9 +202,9 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionWithUserCallableLogsUserData(): void
     {
-        $config                     = config('LoggingExtended');
-        $config->exception['user']  = fn () => ['id' => 42, 'email' => 'user@example.com'];
-        $config->exception['trace'] = false;
+        $config                              = config('LoggingExtended');
+        $config->exception['context']['user'] = fn () => ['id' => 42, 'email' => 'user@example.com'];
+        $config->exception['trace']          = false;
 
         $e = new RuntimeException('With user');
         $this->logger->exception($e);
@@ -202,9 +216,9 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionUserCallableReturningNullOmitsUserKey(): void
     {
-        $config                     = config('LoggingExtended');
-        $config->exception['user']  = fn () => null;
-        $config->exception['trace'] = false;
+        $config                              = config('LoggingExtended');
+        $config->exception['context']['user'] = fn () => null;
+        $config->exception['trace']          = false;
 
         $e = new RuntimeException('No user');
         $this->logger->exception($e);
@@ -215,9 +229,9 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionWithContextArrayResolvesEachKey(): void
     {
-        $config                      = config('LoggingExtended');
-        $config->exception['trace']  = false;
-        $config->exception['context'] = [
+        $config                               = config('LoggingExtended');
+        $config->exception['trace']           = false;
+        $config->exception['context']['extra'] = [
             'tenant' => fn () => 'acme',
             'region' => fn () => 'us-east-1',
         ];
@@ -232,9 +246,9 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionContextResolverReturningNullOmitsKey(): void
     {
-        $config                       = config('LoggingExtended');
-        $config->exception['trace']   = false;
-        $config->exception['context'] = [
+        $config                               = config('LoggingExtended');
+        $config->exception['trace']           = false;
+        $config->exception['context']['extra'] = [
             'nullable' => fn () => null,
         ];
 
@@ -273,7 +287,7 @@ final class LoggerTest extends CIUnitTestCase
     {
         $config                       = config('LoggingExtended');
         $config->exception['trace']   = false;
-        $config->exception['session'] = true;
+        $config->exception['context']['session'] = true;
 
         $e = new RuntimeException('Session test');
 
@@ -323,5 +337,190 @@ final class LoggerTest extends CIUnitTestCase
 
         $this->assertSame('[REDACTED]', $redacted['PASSWORD']);
         $this->assertSame('[REDACTED]', $redacted['Api_Key']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Alert handlers
+    // -------------------------------------------------------------------------
+
+    public function testAlertHandlerIsCalledForMatchingLevel(): void
+    {
+        $called = false;
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['handlers'] = [function (\Brunoggdev\LoggingExtended\LogAlert $alert) use (&$called) {
+            $called = true;
+        }];
+
+        $this->logger->error('Alert test');
+
+        $this->assertTrue($called, 'Alert handler was not called for matching level.');
+    }
+
+    public function testAlertHandlerReceivesCorrectLogAlert(): void
+    {
+        $received = null;
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['handlers'] = [function (\Brunoggdev\LoggingExtended\LogAlert $alert) use (&$received) {
+            $received = $alert;
+        }];
+
+        $this->logger->error('My alert message', ['key' => 'value']);
+
+        $this->assertInstanceOf(\Brunoggdev\LoggingExtended\LogAlert::class, $received);
+        $this->assertSame('error', $received->level);
+        $this->assertSame('My alert message', $received->message);
+        $this->assertSame(['key' => 'value'], $received->context);
+        $this->assertIsFloat($received->timestamp);
+    }
+
+    public function testAlertHandlerNotCalledForNonMatchingLevel(): void
+    {
+        $called = false;
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['critical'];
+        $config->exception['alerts']['handlers'] = [function () use (&$called) {
+            $called = true;
+        }];
+
+        $this->logger->warning('Should not trigger alert');
+
+        $this->assertFalse($called, 'Alert handler was called for non-matching level.');
+    }
+
+    public function testAlertHandlerNotCalledWhenAlertLevelsEmpty(): void
+    {
+        $called = false;
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = [];
+        $config->exception['alerts']['handlers'] = [function () use (&$called) {
+            $called = true;
+        }];
+
+        $this->logger->error('No levels configured');
+
+        $this->assertFalse($called);
+    }
+
+    public function testAlertHandlerNotCalledWhenHandlersEmpty(): void
+    {
+        // Should not throw even with a matching level and no handlers
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['handlers'] = [];
+
+        $this->logger->error('No handlers configured');
+        $this->expectNotToPerformAssertions();
+    }
+
+    public function testBrokenAlertHandlerDoesNotTakeDownLogger(): void
+    {
+        $secondCalled = false;
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['handlers'] = [
+            function () { throw new \RuntimeException('Handler exploded'); },
+            function () use (&$secondCalled) { $secondCalled = true; },
+        ];
+
+        $this->logger->error('Broken handler test');
+
+        $this->assertTrue($secondCalled, 'Second handler was not called after first threw.');
+        $this->assertFileExists($this->logFile, 'Log file should still be written despite broken handler.');
+    }
+
+    public function testInvokableClassAlertHandler(): void
+    {
+        $called = false;
+
+        $handler = new class ($called) {
+            public function __construct(private bool &$ref) {}
+
+            public function __invoke(\Brunoggdev\LoggingExtended\LogAlert $alert): void
+            {
+                $this->ref = true;
+            }
+        };
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['handlers'] = [$handler];
+
+        $this->logger->error('Invokable handler test');
+
+        $this->assertTrue($called);
+    }
+
+    public function testMultipleAlertHandlersAllCalled(): void
+    {
+        $count = 0;
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['handlers'] = [
+            function () use (&$count) { $count++; },
+            function () use (&$count) { $count++; },
+            function () use (&$count) { $count++; },
+        ];
+
+        $this->logger->error('Multiple handlers');
+
+        $this->assertSame(3, $count);
+    }
+
+    // -------------------------------------------------------------------------
+    // Alert throttling
+    // -------------------------------------------------------------------------
+
+    public function testAlertThrottleSuppressesRepeatedAlerts(): void
+    {
+        $count = 0;
+
+        $config                               = config('LoggingExtended');
+        $config->exception['alerts']['levels']    = ['error'];
+        $config->exception['alerts']['throttle']  = 15;
+        $config->exception['alerts']['handlers']  = [function () use (&$count) { $count++; }];
+
+        $this->logger->error('Throttle test message');
+        $this->logger->error('Throttle test message'); // should be suppressed
+        $this->logger->error('Throttle test message'); // should be suppressed
+
+        $this->assertSame(1, $count, 'Handler should only fire once within throttle window.');
+    }
+
+    public function testAlertThrottleDoesNotSuppressDifferentMessages(): void
+    {
+        $count = 0;
+
+        $config                               = config('LoggingExtended');
+        $config->exception['alerts']['levels']    = ['error'];
+        $config->exception['alerts']['throttle']  = 15;
+        $config->exception['alerts']['handlers']  = [function () use (&$count) { $count++; }];
+
+        $this->logger->error('First unique message');
+        $this->logger->error('Second unique message');
+
+        $this->assertSame(2, $count, 'Different messages should each fire the handler.');
+    }
+
+    public function testAlertThrottleZeroDisablesThrottling(): void
+    {
+        $count = 0;
+
+        $config                               = config('LoggingExtended');
+        $config->exception['alerts']['levels']    = ['error'];
+        $config->exception['alerts']['throttle']  = 0;
+        $config->exception['alerts']['handlers']  = [function () use (&$count) { $count++; }];
+
+        $this->logger->error('Same message');
+        $this->logger->error('Same message');
+
+        $this->assertSame(2, $count, 'With throttle=0 every call should fire the handler.');
     }
 }

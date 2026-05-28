@@ -47,7 +47,7 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
             $config->validateViewer();
             $this->fail('Expected RuntimeException was not thrown.');
         } catch (RuntimeException $e) {
-            foreach (['routesPath', 'gate', 'deeplink', 'perPage'] as $key) {
+            foreach (['routes', 'gate', 'deeplink', 'perPage'] as $key) {
                 $this->assertStringContainsString($key, $e->getMessage());
             }
         }
@@ -68,11 +68,11 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
     public function testValidateExceptionThrowsRuntimeExceptionListingMissingKeys(): void
     {
         $config = new LoggingExtended();
-        unset($config->exception['trace'], $config->exception['user']);
+        unset($config->exception['trace'], $config->exception['request']);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/trace/');
-        $this->expectExceptionMessageMatches('/user/');
+        $this->expectExceptionMessageMatches('/request/');
 
         $config->validateException();
     }
@@ -86,7 +86,7 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
             $config->validateException();
             $this->fail('Expected RuntimeException was not thrown.');
         } catch (RuntimeException $e) {
-            foreach (['request', 'params', 'headers', 'redact', 'user', 'session', 'context'] as $key) {
+            foreach (['request', 'context', 'alerts'] as $key) {
                 $this->assertStringContainsString($key, $e->getMessage());
             }
         }
@@ -135,43 +135,110 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
     // Custom gate (??= behaviour)
     // -------------------------------------------------------------------------
 
-    public function testSubclassGateSetBeforeParentConstructorWinsOverDefault(): void
+    public function testSubclassViewerMethodOverridesGate(): void
     {
-        $customGateCalled = false;
-
-        $config = new class ($customGateCalled) extends LoggingExtended {
-            public function __construct(private bool &$calledRef)
+        $config = new class () extends LoggingExtended {
+            protected function viewer(): array
             {
-                // Set gate BEFORE parent::__construct() — ??= should keep this value
-                $this->viewer['gate'] = function () use (&$calledRef): bool {
-                    $calledRef = true;
-
-                    return true;
-                };
-
-                parent::__construct();
+                return array_replace(parent::viewer(), ['gate' => fn () => true]);
             }
         };
 
-        $gate   = $config->viewer['gate'];
-        $result = $gate();
+        $gate = $config->viewer['gate'];
 
-        $this->assertTrue($customGateCalled, 'Custom gate callable was not invoked.');
-        $this->assertTrue($result);
+        $this->assertTrue($gate(), 'Overridden gate should return true.');
     }
 
-    public function testSubclassGateAlwaysReturnsFalseIsPreservedByNullCoalesce(): void
+    public function testSubclassViewerMethodCanReturnFalseGate(): void
     {
         $config = new class () extends LoggingExtended {
-            public function __construct()
+            protected function viewer(): array
             {
-                $this->viewer['gate'] = fn () => false;
-                parent::__construct();
+                return array_replace(parent::viewer(), ['gate' => fn () => false]);
             }
         };
 
         $gate = $config->viewer['gate'];
 
         $this->assertFalse($gate());
+    }
+
+    // -------------------------------------------------------------------------
+    // GATE_LOGIN constant
+    // -------------------------------------------------------------------------
+
+    public function testGateLoginConstantIsString(): void
+    {
+        $this->assertIsString(LoggingExtended::GATE_LOGIN);
+    }
+
+    public function testGateLoginSentinelCanBeSetAsGate(): void
+    {
+        $config = new class () extends LoggingExtended {
+            protected function viewer(): array
+            {
+                return array_replace(parent::viewer(), ['gate' => LoggingExtended::GATE_LOGIN]);
+            }
+        };
+
+        $this->assertSame(LoggingExtended::GATE_LOGIN, $config->viewer['gate']);
+    }
+
+    // -------------------------------------------------------------------------
+    // filters key
+    // -------------------------------------------------------------------------
+
+    public function testDefaultFiltersIsEmptyArray(): void
+    {
+        $config = new LoggingExtended();
+
+        $this->assertSame([], $config->viewer['routes']['filters']);
+    }
+
+    public function testValidateViewerRequiresRoutesKey(): void
+    {
+        $config = new LoggingExtended();
+        unset($config->viewer['routes']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/routes/');
+
+        $config->validateViewer();
+    }
+
+    // -------------------------------------------------------------------------
+    // alertHandlers / alertLevels keys
+    // -------------------------------------------------------------------------
+
+    public function testDefaultAlertsHandlersIsEmptyArray(): void
+    {
+        $config = new LoggingExtended();
+
+        $this->assertSame([], $config->exception['alerts']['handlers']);
+    }
+
+    public function testDefaultAlertsLevelsIsEmptyArray(): void
+    {
+        $config = new LoggingExtended();
+
+        $this->assertSame([], $config->exception['alerts']['levels']);
+    }
+
+    public function testDefaultAlertsThrottleIsFifteenMinutes(): void
+    {
+        $config = new LoggingExtended();
+
+        $this->assertSame(15 * MINUTE, $config->exception['alerts']['throttle']);
+    }
+
+    public function testValidateExceptionRequiresAlertsKey(): void
+    {
+        $config = new LoggingExtended();
+        unset($config->exception['alerts']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/alerts/');
+
+        $config->validateException();
     }
 }

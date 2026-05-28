@@ -1,6 +1,6 @@
 {
     "name": "brunoggdev/ci4-logging-extended",
-    "description": "Extended logger for CodeIgniter 4: improved context serialization and a convenient log:tail Spark command to inspect log files in real time.",
+    "description": "Extended logging for CodeIgniter 4: improved context serialization, exception() method with rich context, web-based Log Viewer with IDE deep links, and exception alerting.",
     "type": "library",
     "license": "MIT",
     "authors": [

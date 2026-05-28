@@ -5,7 +5,11 @@ declare(strict_types=1);
 namespace Brunoggdev\LoggingExtended;
 
 use Brunoggdev\LoggingExtended\Config\LoggingExtended;
+use Brunoggdev\LoggingExtended\LogAlert;
+use CodeIgniter\Cache\CacheFactory;
+use CodeIgniter\Cache\CacheInterface;
 use CodeIgniter\Log\Logger as CI4Logger;
+use Config\Cache as CacheConfig;
 use Throwable;
 
 /**
@@ -22,6 +26,9 @@ use Throwable;
  */
 class Logger extends CI4Logger
 {
+    /** Isolated file cache for alert throttling — shared across all Logger instances. */
+    private static ?CacheInterface $alertCache = null;
+
     /**
      * Logs a caught Throwable with rich context: location, request, user, trace.
      *
@@ -54,7 +61,8 @@ class Logger extends CI4Logger
      */
     protected function buildExceptionContext(Throwable $e, LoggingExtended $config): array
     {
-        $ex = $config->exception;
+        $req = $config->exception['request'];
+        $ctx = $config->exception['context'];
 
         $context = [
             'class'    => $e::class,
@@ -62,27 +70,27 @@ class Logger extends CI4Logger
             'location' => $e->getFile() . ':' . $e->getLine(),
         ];
 
-        if ($ex['request'] && ! is_cli()) {
-            $request = service('request');
+        if ($req['enabled'] && ! is_cli()) {
+            $request            = service('request');
             $context['request'] = [
                 'method' => $request->getMethod(),
                 'url'    => current_url(),
             ];
 
-            if ($ex['params']) {
+            if ($req['params']) {
                 $params = [];
                 $get    = $request->getGet() ?: [];
                 $post   = $request->getPost() ?: [];
                 $json   = (array) ($request->getJSON(true) ?: []);
 
                 if ($get !== []) {
-                    $params['query'] = $this->redactParams($get, $ex['redact']);
+                    $params['query'] = $this->redactParams($get, $req['redact']);
                 }
 
                 if ($post !== []) {
-                    $params['body'] = $this->redactParams($post, $ex['redact']);
+                    $params['body'] = $this->redactParams($post, $req['redact']);
                 } elseif ($json !== []) {
-                    $params['body'] = $this->redactParams($json, $ex['redact']);
+                    $params['body'] = $this->redactParams($json, $req['redact']);
                 }
 
                 if ($params !== []) {
@@ -90,22 +98,29 @@ class Logger extends CI4Logger
                 }
             }
 
-            if ($ex['headers']) {
-                $headers = [];
+            if ($req['headers'] !== false) {
+                $allowList = is_array($req['headers']) ? $req['headers'] : [];
+                $headers   = [];
 
                 foreach ($request->getHeaders() as $name => $header) {
+                    if ($allowList !== [] && ! in_array($name, $allowList, true)) {
+                        continue;
+                    }
+
                     $headers[$name] = is_array($header)
                         ? implode(', ', array_map(fn ($h) => $h->getValueLine(), $header))
                         : $header->getValueLine();
                 }
 
-                $context['headers'] = $this->redactParams($headers, $ex['redact']);
+                if ($headers !== []) {
+                    $context['headers'] = $this->redactParams($headers, $req['redact']);
+                }
             }
         }
 
-        if (is_callable($ex['user'])) {
+        if (is_callable($ctx['user'])) {
             try {
-                $user = ($ex['user'])();
+                $user = ($ctx['user'])();
                 if ($user !== null) {
                     $context['user'] = $user;
                 }
@@ -114,16 +129,16 @@ class Logger extends CI4Logger
             }
         }
 
-        if ($ex['session'] === true && ! is_cli()) {
+        if ($ctx['session'] === true && ! is_cli()) {
             // Guard: session() is not available in CLI contexts
             try {
                 $context['session'] = session()->get();
             } catch (Throwable) {
                 // Session unavailable — skip
             }
-        } elseif (is_callable($ex['session'])) {
+        } elseif (is_callable($ctx['session'])) {
             try {
-                $session = ($ex['session'])();
+                $session = ($ctx['session'])();
                 if ($session !== null) {
                     $context['session'] = $session;
                 }
@@ -132,7 +147,7 @@ class Logger extends CI4Logger
             }
         }
 
-        foreach ($ex['context'] as $key => $resolver) {
+        foreach ($ctx['extra'] as $key => $resolver) {
             try {
                 $value = $resolver();
                 if ($value !== null) {
@@ -143,7 +158,7 @@ class Logger extends CI4Logger
             }
         }
 
-        if ($ex['trace']) {
+        if ($config->exception['trace']) {
             $context['trace'] = $e->getTraceAsString();
         }
 
@@ -167,6 +182,94 @@ class Logger extends CI4Logger
         });
 
         return $params;
+    }
+
+    /**
+     * Overrides CI4's log() to dispatch alert handlers after writing to file.
+     *
+     * Alert handlers are only called when the level matches `alertLevels` in config.
+     * Each handler is resolved as: callable, invokable class, or class with handle().
+     * A broken handler never takes down the logger — all calls are wrapped in try/catch.
+     *
+     * @param string $level
+     * @param string $message
+     */
+    public function log($level, $message, array $context = []): void
+    {
+        parent::log($level, $message, $context);
+
+        /** @var LoggingExtended $config */
+        $config = config('LoggingExtended');
+
+        $alerts = $config->exception['alerts'];
+
+        if ($alerts['handlers'] === [] || $alerts['levels'] === []) {
+            return;
+        }
+
+        if (! in_array(strtolower((string) $level), $alerts['levels'], true)) {
+            return;
+        }
+
+        $throttle = (int) $alerts['throttle'];
+
+        if ($throttle > 0) {
+            $cacheKey = 'lv_alert_' . md5($level . $message);
+            if ($this->alertCache()->get($cacheKey) !== null) {
+                return;
+            }
+        }
+
+        $alert = new LogAlert(
+            level:     strtolower((string) $level),
+            message:   (string) $message,
+            context:   $context,
+            timestamp: microtime(true),
+        );
+
+        foreach ($alerts['handlers'] as $handler) {
+            try {
+                if (is_callable($handler)) {
+                    $handler($alert);
+                } elseif (is_string($handler)) {
+                    $instance = new $handler();
+                    if (is_callable($instance)) {
+                        $instance($alert);
+                    } else {
+                        $instance->handle($alert);
+                    }
+                }
+            } catch (Throwable) {
+                // A broken handler must never take down the logger itself
+            }
+        }
+
+        if ($throttle > 0) {
+            $this->alertCache()->save($cacheKey, true, $throttle);
+        }
+    }
+
+    /**
+     * Returns the isolated file cache used for alert throttling.
+     * Initialised once and shared across all calls (static property).
+     */
+    private function alertCache(): CacheInterface
+    {
+        if (self::$alertCache === null) {
+            $storePath = WRITEPATH . 'cache/log_alerts/';
+
+            if (! is_dir($storePath)) {
+                mkdir($storePath, 0755, true);
+            }
+
+            $config          = new CacheConfig();
+            $config->handler = 'file';
+            $config->file    = ['storePath' => $storePath, 'mode' => 0640];
+
+            self::$alertCache = CacheFactory::getHandler($config);
+        }
+
+        return self::$alertCache;
     }
 
     /**

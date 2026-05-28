@@ -38,53 +38,97 @@ class LoggingExtendedPublish extends BaseCommand
 
             class LoggingExtended extends BaseLoggingExtended
             {
-                public array $viewer = [
-                    'enabled'    => true,       // set to false to completely hide the viewer and its routes
-                    'routesPath' => 'logs',     // URL path: your-app.test/logs
-                    'gate'       => null,       // null = deny; defaults to development-only (set in parent constructor)
-                    'deeplink'   => [
-                        'ide'        => 'vscode',   // 'vscode', 'phpstorm', or null to disable links
-                        'wslDistro'  => null,       // e.g. 'Ubuntu' — required for VSCode links on WSL
-                        'serverPath' => null,       // path prefix in the logs e.g. '/var/www/myapp/'
-                        'localPath'  => null,       // your local equivalent e.g. '/home/user/project/'
-                    ],
-                    'perPage'    => 50,         // entries per page
-                ];
 
-                public array $exception = [
-                    'trace'   => true,      // include full stack trace
-                    'request' => true,      // log method + URL (searchable: request.method, request.url)
-                    'params'  => false,     // GET/POST/JSON body — off by default (privacy)
-                    'headers' => false,     // request headers — off by default (may expose tokens/cookies)
-                    'redact'  => [          // keys redacted from params and headers (case-insensitive, recursive)
-                                    'password',
-                                    'passwd',
-                                    'pass',
-                                    'secret',
-                                    'token',
-                                    'api_key',
-                                    'apikey',
-                                    'authorization',
-                                    'auth',
-                                    'credit_card',
-                                    'card_number',
-                                    'cvv',
-                                    'cc',
-                    ],
-                    'user'    => null,      // callable returning user data (searchable: user.email, user.id)
-                    'session' => false,     // true = all session data; callable for filtered keys — off by default (privacy)
-                    'context' => [],        // ['label' => callable] for custom context (searchable: label.key)
-                ];
+                /* ------------------------------------------------------------------------
+                | Although it may look unconventional for a CI4 config file, the method
+                | approach used here lets you use dynamic calls like env() and define
+                | closures inline — so every config decision lives in one place and reads
+                | as a single coherent unit, with no need for a constructor or for splitting
+                | static declarations and dynamic overrides across two locations.
+                ------------------------------------------------------------------------ */
+                 
 
-                public function __construct()
+                protected function viewer(): array
                 {
-                    // Set your overrides before parent::__construct(), e.g.:
-                    // $this->viewer['gate']       = fn() => auth()->loggedIn();
-                    // $this->exception['user']    = fn() => ['id' => auth()->id(), 'email' => auth()->user()?->email];
-                    // $this->exception['session'] = true;
-                    // $this->exception['context'] = ['tenant' => fn() => session('tenant_id')];
+                    return [
+                                    // Set to false to completely hide the viewer and its routes
+                                    'enabled' => true,
 
-                    parent::__construct(); // applies defaults and validates — keep at the bottom
+                                    // Controls access:
+                                    //   null              = deny outside development (default)
+                                    //   self::GATE_LOGIN  = built-in login page (requires LOG_VIEWER_PASSWORD_HASH in .env)
+                                    //   fn() => bool      = custom callable e.g. fn() => auth()->loggedIn()
+                                    'gate' => null,
+
+                                    // URL path and optional CI4 filter aliases applied before the gate
+                                    'routes' => [
+                                        'path'    => 'logs',
+                                        'filters' => [],
+                                    ],
+
+                                    // IDE deep links for stack frames — set wslDistro if on WSL
+                                    // e.g. 'wslDistro' => env('LE_WSL_DISTRO')
+                                    // Set serverPath + localPath to rewrite server paths to your local equivalent
+                                    // e.g. 'serverPath' => '/var/www/myapp/', 'localPath' => env('LE_LOCAL_PATH')
+                                    'deeplink' => [
+                                        'ide'        => 'vscode',
+                                        'wslDistro'  => null,
+                                        'serverPath' => null,
+                                        'localPath'  => null,
+                                    ],
+
+                                    // Entries displayed per page
+                                    'perPage' => 50,
+                    ];
+                }
+
+                protected function exception(): array
+                {
+                    return [
+                                    // Include the full stack trace in each exception log entry
+                                    'trace' => true,
+
+                                    'request' => [
+                                        // Log request method + URL — enables request.method=, request.url= search
+                                        'enabled' => true,
+                                        // Include GET/POST/JSON body — off by default (privacy)
+                                        'params'  => false,
+                                        // true = all headers; array of names = allow-list; false = off (default)
+                                        'headers' => false,
+                                        // Keys redacted from params and headers (case-insensitive, applied recursively)
+                                        'redact'  => [
+                                            'password', 'passwd', 'pass', 'secret', 'token',
+                                            'api_key', 'apikey', 'authorization', 'auth',
+                                            'cookie', 'credit_card', 'card_number', 'cvv', 'cc',
+                                        ],
+                                    ],
+
+                                    'context' => [
+                                        // Callable returning user data — enables user.id=, user.email= search
+                                        // e.g. fn() => ['id' => auth()->id(), 'email' => auth()->user()?->email]
+                                        'user' => null,
+
+                                        // true = capture all session data; callable for specific keys — off by default (privacy)
+                                        'session' => false,
+
+                                        // Named callables for arbitrary context — each key becomes searchable
+                                        // e.g. ['tenant' => fn() => session('tenant_id')]
+                                        'extra' => [],
+                                    ],
+
+                                    'alerts' => [
+                                        // Callables, invokable classes, or classes with handle(LogAlert)
+                                        // e.g. [SlackAlertHandler::class]
+                                        'handlers' => [],
+
+                                        // Log levels that trigger handlers e.g. ['critical', 'error']
+                                        'levels' => [],
+
+                                        // How long to suppress repeated alerts for the same level + message; 0 = no throttling
+                                        // e.g. 15 * MINUTE, 2 * HOUR
+                                        'throttle' => 15 * MINUTE,
+                                    ],
+                                ];
                 }
             }
             PHP;

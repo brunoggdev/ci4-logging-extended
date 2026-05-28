@@ -308,6 +308,16 @@ final class LogViewerServiceTest extends CIUnitTestCase
         $this->assertCount(0, $filtered);
     }
 
+    public function testFilterEntriesTextSearchMatchesScalarContextKeyValuePair(): void
+    {
+        $entries  = $this->makeEntries();
+        // 'location' is a scalar context key — searching key=value should match
+        $filtered = $this->service->filterEntries($entries, [], 'location=/app/Models');
+
+        $this->assertCount(1, $filtered);
+        $this->assertSame('Database connection failed', $filtered[0]['message']);
+    }
+
     public function testFilterEntriesNonMatchingQueryReturnsEmptyArray(): void
     {
         $entries  = $this->makeEntries();

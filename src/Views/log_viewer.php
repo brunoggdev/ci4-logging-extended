@@ -122,7 +122,7 @@ if (! function_exists('lvToggleLevelUrl')) {
     }
 }
 
-$basePath      = trim($viewerConfig->viewer['routesPath'], '/');
+$basePath      = trim($viewerConfig->viewer['routes']['path'], '/');
 $deeplink      = $viewerConfig->viewer['deeplink'];
 $levelOrder    = ['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'];
 $presentLevels = array_values(array_intersect($levelOrder, array_keys($levelCounts)));
@@ -312,9 +312,13 @@ include __DIR__ . '/log_viewer_head.php';
                                             <?php endif ?>
                                         </div>
                                         <?php if (! empty($entry['context'])): ?>
-                                            <div class="d-flex flex-wrap gap-1 mt-1">
-                                                <?php foreach ($entry['context'] as $key => $val): ?>
-                                                    <?php if ($key === 'location'): ?>
+                                            <?php
+                                            $ctxOther  = array_diff_key($entry['context'], ['location' => 1, 'request' => 1]);
+                                            $hasInline = isset($entry['context']['location']) || isset($entry['context']['request']);
+                                            ?>
+                                            <?php if ($hasInline): ?>
+                                                <div class="d-flex flex-wrap gap-1 mt-1">
+                                                    <?php if (isset($entry['context']['location'])): ?>
                                                         <span class="ctx-pill">
                                                             <span class="opacity-75">location=</span>
                                                             <span class="text-primary">
@@ -323,18 +327,49 @@ include __DIR__ . '/log_viewer_head.php';
                                                                         <?= esc(basename($locFile)) ?>:<?= esc($locLine) ?>
                                                                     </a>
                                                                 <?php else: ?>
-                                                                    <?= esc($val) ?>
+                                                                    <?= esc($entry['context']['location']) ?>
                                                                 <?php endif ?>
                                                             </span>
                                                         </span>
-                                                    <?php else: ?>
-                                                        <span class="ctx-pill">
-                                                            <span class="opacity-75"><?= esc($key) ?>=</span>
-                                                            <span class="text-primary"><?= esc(is_array($val) ? json_encode($val, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : $val) ?></span>
+                                                    <?php endif ?>
+                                                    <?php if (isset($entry['context']['request'])): ?>
+                                                        <?php
+                                                        $req  = $entry['context']['request'];
+                                                        $path = parse_url($req['url'] ?? '', PHP_URL_PATH) ?: ($req['url'] ?? '');
+                                                        ?>
+                                                        <span class="ctx-pill" title="<?= esc(($req['method'] ?? '') . ' ' . ($req['url'] ?? '')) ?>">
+                                                            <span class="text-primary fw-semibold"><?= esc($req['method'] ?? '') ?></span>
+                                                            <span class="opacity-75"><?= esc($path) ?></span>
                                                         </span>
                                                     <?php endif ?>
-                                                <?php endforeach ?>
-                                            </div>
+                                                </div>
+                                            <?php endif ?>
+                                            <?php if (! empty($ctxOther)): ?>
+                                                <?php
+                                                $ctxPriority = ['user', 'session'];
+                                                $ctxKeys     = array_keys($ctxOther);
+                                                $ctxOrdered  = array_merge(
+                                                    array_intersect($ctxPriority, $ctxKeys),
+                                                    array_diff($ctxKeys, $ctxPriority)
+                                                );
+                                                ?>
+                                                <details class="stacktrace">
+                                                    <summary><?= count($ctxOther) ?> context key<?= count($ctxOther) !== 1 ? 's' : '' ?></summary>
+                                                    <div class="ctx-expand-body">
+                                                        <table>
+                                                            <?php foreach ($ctxOrdered as $key):
+                                                                $val = $ctxOther[$key];
+                                                                $raw = is_array($val) ? json_encode($val, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : $val;
+                                                            ?>
+                                                                <tr>
+                                                                    <td class="ctx-row-key"><?= esc($key) ?></td>
+                                                                    <td class="ctx-row-val"><?= esc($raw) ?></td>
+                                                                </tr>
+                                                            <?php endforeach ?>
+                                                        </table>
+                                                    </div>
+                                                </details>
+                                            <?php endif ?>
                                         <?php endif ?>
                                         <?php if (! empty($entry['stacktrace'])): ?>
                                             <details class="stacktrace">

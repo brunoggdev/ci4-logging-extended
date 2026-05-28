@@ -1,4 +1,5 @@
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js';document.head.appendChild(s)"></script>
 <script>
 (function () {
     var cfg = window.LV_CONFIG || {};
@@ -344,7 +345,8 @@
 
     function buildRow(entry) {
         var ctx      = entry.context || {};
-        var location = ctx.location || null;
+        var location = ctx.location  || null;
+        var req      = ctx.request   || null;
         var link = null, locFile = null, locLine = null;
 
         if (location) {
@@ -354,36 +356,62 @@
             link    = ideLink(locFile, locLine);
         }
 
-        var ctxHtml = '';
-        for (var key in ctx) {
-            if (! Object.prototype.hasOwnProperty.call(ctx, key)) continue;
-            var val = ctx[key];
-            if (key === 'location') {
-                ctxHtml += link
-                    ? '<span class="ctx-pill"><span class="opacity-75">location=</span>'
-                        + '<span class="text-primary"><a href="' + esc(link) + '" class="link-primary text-decoration-none">'
-                        + esc(basename(locFile)) + ':' + esc(locLine) + '</a></span></span>'
-                    : '<span class="ctx-pill"><span class="opacity-75">location=</span>'
-                        + '<span class="text-primary">' + esc(location) + '</span></span>';
-                continue;
-            } else {
-                ctxHtml += '<span class="ctx-pill"><span class="opacity-75">' + esc(key) + '=</span>'
-                    + '<span class="text-primary">' + esc(val) + '</span></span>';
-            }
+        // ── Inline pills: location + request ─────────────────────────────
+        var inlineHtml = '';
+        if (location) {
+            inlineHtml += link
+                ? '<span class="ctx-pill"><span class="opacity-75">location=</span>'
+                    + '<span class="text-primary"><a href="' + esc(link) + '" class="link-primary text-decoration-none">'
+                    + esc(basename(locFile)) + ':' + esc(locLine) + '</a></span></span>'
+                : '<span class="ctx-pill"><span class="opacity-75">location=</span>'
+                    + '<span class="text-primary">' + esc(location) + '</span></span>';
+        }
+        if (req) {
+            var method = req.method || '';
+            var url    = req.url    || '';
+            var path   = url;
+            try { path = new URL(url).pathname; } catch (ignore) {}
+            inlineHtml += '<span class="ctx-pill" title="' + esc(method + ' ' + url) + '">'
+                + '<span class="text-primary fw-semibold">' + esc(method) + '</span>'
+                + ' <span class="opacity-75">' + esc(path) + '</span></span>';
         }
 
+        // ── Collapsible context: everything else ──────────────────────────
+        var PRIORITY     = ['user', 'session'];
+        var ctxOtherKeys = Object.keys(ctx).filter(function (k) { return k !== 'location' && k !== 'request'; });
+        var ctxSorted    = PRIORITY.filter(function (k) { return ctxOtherKeys.indexOf(k) !== -1; })
+                                   .concat(ctxOtherKeys.filter(function (k) { return PRIORITY.indexOf(k) === -1; }));
+
+        var ctxRowsHtml = '';
+        for (var ki = 0; ki < ctxSorted.length; ki++) {
+            var key = ctxSorted[ki];
+            var val = ctx[key];
+            var raw = (val !== null && typeof val === 'object') ? JSON.stringify(val) : val;
+            ctxRowsHtml += '<tr><td class="ctx-row-key">' + esc(key) + '</td>'
+                + '<td class="ctx-row-val">' + esc(raw) + '</td></tr>';
+        }
+
+        var detailsHtml = '';
+        if (ctxRowsHtml) {
+            var n   = ctxSorted.length;
+            var sum = n + ' context key' + (n !== 1 ? 's' : '');
+            detailsHtml = '<details class="stacktrace"><summary>' + sum + '</summary>'
+                + '<div class="ctx-expand-body"><table>' + ctxRowsHtml + '</table></div></details>';
+        }
+
+        // ── Stack trace ───────────────────────────────────────────────────
         var frames = entry.stacktrace || [], traceHtml = '';
         if (frames.length) {
-            var sum   = frames.length + ' stack frame' + (frames.length !== 1 ? 's' : '');
+            var tsum       = frames.length + ' stack frame' + (frames.length !== 1 ? 's' : '');
             var frameLines = frames.map(function (f) {
-                var fd = parseStackFrame(f);
-                var fl = fd ? ideLink(fd.file, fd.line) : null;
+                var fd  = parseStackFrame(f);
+                var fl  = fd ? ideLink(fd.file, fd.line) : null;
                 var btn = fl
                     ? ' <a href="' + esc(fl) + '" class="text-body-secondary lv-frame-link flex-shrink-0" title="Open in IDE"><i class="bi bi-code-slash"></i></a>'
                     : '';
                 return '<div class="stacktrace-line d-flex align-items-baseline gap-1"><span class="flex-grow-1">' + esc(f) + '</span>' + btn + '</div>';
             }).join('');
-            traceHtml = '<details class="stacktrace"><summary>' + sum + '</summary><div class="stacktrace-lines">' + frameLines + '</div></details>';
+            traceHtml = '<details class="stacktrace"><summary>' + tsum + '</summary><div class="stacktrace-lines">' + frameLines + '</div></details>';
         }
 
         var tr           = document.createElement('tr');
@@ -395,7 +423,8 @@
             '<td class="text-center"><span class="badge ' + levelBadge(entry.level) + '">' + esc(entry.level) + '</span></td>' +
             '<td class="font-monospace text-nowrap small">' + esc(entry.datetime) + '</td>' +
             '<td><div class="d-flex align-items-start gap-2"><div class="font-monospace text-break lv-msg flex-grow-1">' + esc(entry.message) + '</div></div>' +
-            (ctxHtml ? '<div class="d-flex flex-wrap gap-1 mt-1">' + ctxHtml + '</div>' : '') +
+            (inlineHtml ? '<div class="d-flex flex-wrap gap-1 mt-1">' + inlineHtml + '</div>' : '') +
+            detailsHtml +
             traceHtml + '</td>' +
             '<td class="lv-row-actions"><div class="d-flex gap-1 justify-content-end pe-2"></div></td>';
         return tr;

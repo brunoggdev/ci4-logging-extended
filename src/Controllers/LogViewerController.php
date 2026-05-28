@@ -21,7 +21,16 @@ class LogViewerController extends Controller
         $this->logDir  = rtrim(WRITEPATH, '/') . '/logs/';
         $this->service = new LogViewerService($this->logDir);
 
-        if ($this->config->viewer['gate'] === null || ! ($this->config->viewer['gate'])()) {
+        $gate        = $this->config->viewer['gate'];
+        $isLoginPage = service('router')->methodName() === 'login';
+
+        if ($gate === null) {
+            throw new PageNotFoundException();
+        }
+
+        if ($gate === LoggingExtended::GATE_LOGIN && ! $isLoginPage) {
+            $this->enforceLoginCookie();
+        } elseif ($gate !== LoggingExtended::GATE_LOGIN && ! $gate()) {
             throw new PageNotFoundException();
         }
     }
@@ -84,6 +93,90 @@ class LogViewerController extends Controller
         ]);
     }
 
+    public function login()
+    {
+        $basePath = trim($this->config->viewer['routes']['path'], '/');
+
+        if ($this->request->is('post')) {
+            $password = $this->request->getPost('password') ?? '';
+            $hash     = env('LOG_VIEWER_PASSWORD_HASH', '');
+
+            if ($hash !== '' && password_verify($password, $hash)) {
+                $this->setLoginCookie();
+                $redirect = $this->request->getPost('redirect') ?: site_url($basePath);
+                return redirect()->to($redirect)->withCookies();
+            }
+
+            return view('\Brunoggdev\LoggingExtended\Views\log_viewer_login', [
+                'basePath' => $basePath,
+                'redirect' => $this->request->getPost('redirect') ?? '',
+                'error'    => true,
+            ]);
+        }
+
+        return view('\Brunoggdev\LoggingExtended\Views\log_viewer_login', [
+            'basePath' => $basePath,
+            'redirect' => $this->request->getGet('redirect') ?? '',
+            'error'    => false,
+        ]);
+    }
+
+    /**
+     * Validates the HMAC login cookie. Redirects to the login page if missing or invalid.
+     */
+    private function enforceLoginCookie(): void
+    {
+        $cookie = $_COOKIE['lv_auth'] ?? '';
+
+        if (! $this->isValidLoginCookie($cookie)) {
+            $basePath = trim($this->config->viewer['routes']['path'], '/');
+            $redirect = urlencode(current_url());
+            header('Location: ' . site_url($basePath . '/login') . '?redirect=' . $redirect);
+            exit;
+        }
+    }
+
+    private function isValidLoginCookie(string $cookie): bool
+    {
+        if ($cookie === '') {
+            return false;
+        }
+
+        $parts = explode('|', $cookie, 2);
+
+        if (count($parts) !== 2) {
+            return false;
+        }
+
+        [$expiry, $token] = $parts;
+
+        if ((int) $expiry < time()) {
+            return false;
+        }
+
+        $hash     = env('LOG_VIEWER_PASSWORD_HASH', '');
+        $expected = hash_hmac('sha256', 'lv_authed|' . $expiry, $hash);
+
+        return hash_equals($expected, $token);
+    }
+
+    private function setLoginCookie(): void
+    {
+        $expiry = time() + (4 * HOUR);
+        $hash   = env('LOG_VIEWER_PASSWORD_HASH', '');
+        $token  = hash_hmac('sha256', 'lv_authed|' . $expiry, $hash);
+
+        service('response')->setCookie([
+            'name'     => 'lv_auth',
+            'value'    => $expiry . '|' . $token,
+            'expire'   => 4 * HOUR,
+            'path'     => '/',
+            'httponly' => true,
+            'samesite' => 'Lax',
+            'secure'   => service('request')->isSecure(),
+        ]);
+    }
+
     public function delete(string $filename)
     {
         $filename = $this->service->sanitizeFilename($filename);
@@ -94,7 +187,7 @@ class LogViewerController extends Controller
             $this->service->clearCache($path);
         }
 
-        return redirect()->to(site_url(trim($this->config->viewer['routesPath'], '/')));
+        return redirect()->to(site_url(trim($this->config->viewer['routes']['path'], '/')));
     }
 
     public function deleteMultiple()
@@ -114,7 +207,7 @@ class LogViewerController extends Controller
             }
         }
 
-        return redirect()->to(site_url(trim($this->config->viewer['routesPath'], '/')));
+        return redirect()->to(site_url(trim($this->config->viewer['routes']['path'], '/')));
     }
 
     public function stream(): void
