@@ -200,6 +200,9 @@ include __DIR__ . '/log_viewer_head.php';
             </form>
             <div class="d-flex align-items-center gap-2">
                 <small class="text-body-secondary"><span id="lv-sel-count">0</span> selected</small>
+                <button type="button" id="lv-sel-visible-btn" class="btn btn-sm btn-link p-0 text-decoration-none text-body-secondary" title="Select all visible">
+                    <i class="bi bi-check-all"></i>
+                </button>
                 <button type="button" id="lv-bulk-delete-btn" class="btn btn-sm btn-danger ms-auto" disabled>
                     <i class="bi bi-trash3 me-1"></i>Delete
                 </button>

@@ -48,8 +48,15 @@
         fileFilter.addEventListener('input', function () {
             var q = this.value.toLowerCase();
             document.querySelectorAll('.lv-file-item').forEach(function (item) {
-                item.style.display = item.dataset.name.toLowerCase().includes(q) ? '' : 'none';
+                var show = item.dataset.name.toLowerCase().includes(q);
+                item.classList.toggle('d-flex', show);
+                item.classList.toggle('d-none', ! show);
+                if (! show) {
+                    var cb = item.querySelector('.lv-file-check input');
+                    if (cb) cb.checked = false;
+                }
             });
+            updateBulkBar();
         });
     }
 
@@ -201,6 +208,16 @@
         document.querySelectorAll('.lv-file-check input').forEach(function (cb) {
             cb.addEventListener('change', updateBulkBar);
         });
+
+        var selVisibleBtn = document.getElementById('lv-sel-visible-btn');
+        if (selVisibleBtn) {
+            selVisibleBtn.addEventListener('click', function () {
+                var visible = Array.from(document.querySelectorAll('.lv-file-item:not(.d-none) .lv-file-check input'));
+                var allChecked = visible.length > 0 && visible.every(function (cb) { return cb.checked; });
+                visible.forEach(function (cb) { cb.checked = ! allChecked; });
+                updateBulkBar();
+            });
+        }
 
         if (bulkDeleteBtn && bulkModal) {
             bulkDeleteBtn.addEventListener('click', function () {
