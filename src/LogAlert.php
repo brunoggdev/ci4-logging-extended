@@ -28,14 +28,12 @@ class LogAlert
      *            'class', 'message', 'location', 'request', 'user', 'session', and 'trace'
      *            are populated by exception() when enabled. Any keys passed directly to
      *            logger()->*() calls are also included.
-     * @param float   $timestamp Unix epoch with microseconds from microtime(true) — timezone-agnostic.
-     *                           Format for display: DateTime::createFromFormat('U.u', number_format($alert->timestamp, 6, '.', ''))
-     *                               ->setTimezone(new \DateTimeZone(app_timezone()))
+     * @param \CodeIgniter\I18n\Time $timestamp Alert time in the app timezone.
      */
     public function __construct(
         public readonly string $level,
         public readonly string $message,
         public readonly array $context,
-        public readonly float $timestamp,
+        public readonly \CodeIgniter\I18n\Time $timestamp,
     ) {}
 }

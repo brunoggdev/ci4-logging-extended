@@ -374,7 +374,7 @@ final class LoggerTest extends CIUnitTestCase
         $this->assertSame('error', $received->level);
         $this->assertSame('My alert message', $received->message);
         $this->assertSame(['key' => 'value'], $received->context);
-        $this->assertIsFloat($received->timestamp);
+        $this->assertInstanceOf(\CodeIgniter\I18n\Time::class, $received->timestamp);
     }
 
     public function testAlertHandlerNotCalledForNonMatchingLevel(): void

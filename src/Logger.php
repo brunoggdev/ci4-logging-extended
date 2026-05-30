@@ -224,7 +224,7 @@ class Logger extends CI4Logger
             level:     strtolower((string) $level),
             message:   (string) $message,
             context:   $context,
-            timestamp: microtime(true),
+            timestamp: \CodeIgniter\I18n\Time::now(),
         );
 
         foreach ($alerts['handlers'] as $handler) {
