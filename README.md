@@ -97,6 +97,8 @@ Default output (with `trace: false` for brevity):
 ERROR - 2026-03-20 14:32:01 --> [RuntimeException] Something went wrong | message="Something went wrong" location=/var/www/app/Services/OrderService.php:84
 ```
 
+`location` points to the call site — if the exception was created via a static constructor (e.g. `AppException::for(...)`), the package walks the stack trace to skip the factory frame and report where it was actually called from.
+
 With a custom message, the exception's own message is omitted from context — the call-site message is the log entry:
 
 ```
@@ -184,7 +186,7 @@ class SlackAlertHandler
 
 `LogAlert` carries `level`, `message`, `context`, and `timestamp`. A broken handler never takes down the logger — all calls are wrapped in try/catch and the file log is always written first.
 
-`throttle` accepts any duration using CI4's time constants (`15 * MINUTE`, `2 * HOUR`, etc.) and uses an isolated file cache — never touches your app's cache store — to suppress repeat alerts for the same level + message within that window.
+`throttle` accepts any duration using CI4's time constants (`15 * MINUTE`, `2 * HOUR`, etc.) and uses an isolated file cache — never touches your app's cache store — to suppress repeat alerts for the same level + message within that window. If a handler returns `false`, the throttle lock is not saved — use this to signal that the alert was not delivered so the next occurrence gets another chance.
 
 ---
 

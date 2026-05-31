@@ -67,7 +67,7 @@ class Logger extends CI4Logger
         $context = [
             'class'    => $e::class,
             'message'  => $e->getMessage(),
-            'location' => $e->getFile() . ':' . $e->getLine(),
+            'location' => $this->resolveExceptionLocation($e),
         ];
 
         if ($req['enabled'] && ! is_cli()) {
@@ -227,26 +227,53 @@ class Logger extends CI4Logger
             timestamp: \CodeIgniter\I18n\Time::now(),
         );
 
+        $delivered = false;
+
         foreach ($alerts['handlers'] as $handler) {
             try {
                 if (is_callable($handler)) {
-                    $handler($alert);
+                    $result = $handler($alert);
                 } elseif (is_string($handler)) {
                     $instance = new $handler();
                     if (is_callable($instance)) {
-                        $instance($alert);
+                        $result = $instance($alert);
                     } else {
-                        $instance->handle($alert);
+                        $result = $instance->handle($alert);
                     }
+                }
+
+                if (($result ?? null) !== false) {
+                    $delivered = true;
                 }
             } catch (Throwable) {
                 // A broken handler must never take down the logger itself
             }
         }
 
-        if ($throttle > 0) {
+        if ($throttle > 0 && $delivered) {
             $this->alertCache()->save($cacheKey, true, $throttle);
         }
+    }
+
+    /**
+     * Returns the location where the exception was thrown.
+     * For the common case this is $e->getFile():$e->getLine() directly.
+     * When the exception is thrown from within its own class (e.g. a factory/named-constructor
+     * pattern), it walks the trace to find the first call site outside that class file.
+     */
+    private function resolveExceptionLocation(Throwable $e): string
+    {
+        foreach ($e->getTrace() as $frame) {
+            if (
+                isset($frame['file'])
+                && ($frame['class'] ?? '') === $e::class
+                && $frame['file'] !== $e->getFile()
+            ) {
+                return $frame['file'] . ':' . ($frame['line'] ?? 0);
+            }
+        }
+
+        return $e->getFile() . ':' . $e->getLine();
     }
 
     /**

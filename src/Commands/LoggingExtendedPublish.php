@@ -126,6 +126,7 @@ class LoggingExtendedPublish extends BaseCommand
 
                                         // How long to suppress repeated alerts for the same level + message; 0 = no throttling
                                         // e.g. 15 * MINUTE, 2 * HOUR
+                                        // A handler returning false opts out — throttle lock is not saved for that call
                                         'throttle' => 15 * MINUTE,
                                     ],
                                 ];

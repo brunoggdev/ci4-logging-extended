@@ -523,4 +523,51 @@ final class LoggerTest extends CIUnitTestCase
 
         $this->assertSame(2, $count, 'With throttle=0 every call should fire the handler.');
     }
+
+    public function testAlertThrottleSkippedWhenHandlerReturnsFalse(): void
+    {
+        $count = 0;
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['throttle'] = 15;
+        $config->exception['alerts']['handlers'] = [function () use (&$count) {
+            $count++;
+
+            return false; // signal: did not deliver, do not throttle
+        }];
+
+        $this->logger->error('Undelivered alert');
+        $this->logger->error('Undelivered alert');
+        $this->logger->error('Undelivered alert');
+
+        $this->assertSame(3, $count, 'Handler returning false should never be throttled.');
+    }
+
+    public function testExceptionLocationIsThrowSiteForDirectException(): void
+    {
+        $config                     = config('LoggingExtended');
+        $config->exception['trace'] = false;
+
+        $e = new \RuntimeException('Direct throw');
+        $this->logger->exception($e);
+
+        // Location should point to this test file — where the exception was created.
+        $this->assertStringContainsString(basename(__FILE__), $this->mainLogLine());
+    }
+
+    public function testExceptionLocationPointsToCallSiteForNamedConstructor(): void
+    {
+        $config                     = config('LoggingExtended');
+        $config->exception['trace'] = false;
+
+        // FactoryException::make() creates the exception inside its own class file.
+        // The resolved location should point back here (the caller), not into FactoryException.php.
+        $e = \Brunoggdev\LoggingExtended\Tests\Fixtures\FactoryException::make('Named constructor exception');
+        $this->logger->exception($e);
+
+        $line = $this->mainLogLine();
+        $this->assertStringContainsString(basename(__FILE__), $line);
+        $this->assertStringNotContainsString('FactoryException.php', $line);
+    }
 }

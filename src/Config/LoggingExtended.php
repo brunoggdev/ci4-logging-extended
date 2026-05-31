@@ -89,7 +89,7 @@ class LoggingExtended extends BaseConfig
      *                - `extra`: ['label' => callable] for arbitrary additional context
      * - **alerts**:  - `handlers`: callables, invokable classes, or classes with handle(LogAlert)
      *                - `levels`: log levels that trigger handlers e.g. ['critical', 'error']
-     *                - `throttle`: minutes to suppress repeated alerts for the same level + message; 0 = off
+     *                - `throttle`: minutes to suppress repeated alerts for the same level + message; 0 = off. A handler returning false opts out — throttle lock is not saved for that call
      *
      * @return array{trace: bool, request: array{enabled: bool, params: bool, headers: bool|list<string>, redact: list<string>}, context: array{user: callable|null, session: bool|callable, extra: array<string, callable>}, alerts: array{handlers: list<callable|string>, levels: list<string>, throttle: int}}
      */
