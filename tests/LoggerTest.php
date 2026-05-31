@@ -523,4 +523,41 @@ final class LoggerTest extends CIUnitTestCase
 
         $this->assertSame(2, $count, 'With throttle=0 every call should fire the handler.');
     }
+
+    public function testAlertThrottleSkippedWhenHandlerReturnsFalse(): void
+    {
+        $count = 0;
+
+        $config                              = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['throttle'] = 15;
+        $config->exception['alerts']['handlers'] = [function () use (&$count) {
+            $count++;
+
+            return false; // signal: did not deliver, do not throttle
+        }];
+
+        $this->logger->error('Undelivered alert');
+        $this->logger->error('Undelivered alert');
+        $this->logger->error('Undelivered alert');
+
+        $this->assertSame(3, $count, 'Handler returning false should never be throttled.');
+    }
+
+    public function testExceptionLocationPointsToCallSiteNotExceptionClass(): void
+    {
+        $config                     = config('LoggingExtended');
+        $config->exception['trace'] = false;
+
+        // Exception is instantiated inside StaticExceptionFactory (separate file),
+        // but called from here — simulating a static-constructor pattern.
+        $e = \Brunoggdev\LoggingExtended\Tests\Fixtures\StaticExceptionFactory::make('Static factory exception');
+        $this->logger->exception($e);
+
+        $line = $this->lastLogLine();
+
+        // Location should point here (this test file), not into the factory class file.
+        $this->assertStringContainsString(basename(__FILE__), $line);
+        $this->assertStringNotContainsString('StaticExceptionFactory.php', $line);
+    }
 }
