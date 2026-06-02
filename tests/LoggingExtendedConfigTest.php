@@ -86,7 +86,7 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
             $config->validateException();
             $this->fail('Expected RuntimeException was not thrown.');
         } catch (RuntimeException $e) {
-            foreach (['request', 'context', 'alerts'] as $key) {
+            foreach (['request', 'captures', 'alerts'] as $key) {
                 $this->assertStringContainsString($key, $e->getMessage());
             }
         }

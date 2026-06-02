@@ -84,9 +84,9 @@ class LoggingExtended extends BaseConfig
      *                - `params`: GET/POST/JSON body (off by default — privacy)
      *                - `headers`: true = all headers; array of names = allow-list; false = off (default)
      *                - `redact`: keys redacted from params and headers (case-insensitive, recursive)
-     * - **context**: - `user`: callable returning user data. Enables user.email=, user.id= search.
-     *                - `session`: true = all session data; callable for specific keys
-     *                - `extra`: ['label' => callable] for arbitrary additional context
+     * - **captures**: - `user`: callable returning user data. Enables user.email=, user.id= search.
+     *                 - `session`: true = all session data; callable for specific keys
+     *                 - `extra`: ['label' => callable] for arbitrary additional context
      * - **alerts**:  - `handlers`: callables, invokable classes, or classes with handle(LogAlert)
      *                - `levels`: log levels that trigger handlers e.g. ['critical', 'error']
      *                - `throttle`: minutes to suppress repeated alerts for the same level + message; 0 = off. A handler returning false opts out — throttle lock is not saved for that call
@@ -107,7 +107,7 @@ class LoggingExtended extends BaseConfig
                     'cookie', 'credit_card', 'card_number', 'cvv', 'cc',
                 ],
             ],
-            'context' => [
+            'captures' => [
                 'user'    => null,
                 'session' => false,
                 'extra'   => [],
@@ -145,7 +145,7 @@ class LoggingExtended extends BaseConfig
      */
     public function validateException(): void
     {
-        $required = ['trace', 'request', 'context', 'alerts'];
+        $required = ['trace', 'request', 'captures', 'alerts'];
         $missing  = array_diff($required, array_keys($this->exception));
 
         if ($missing !== []) {

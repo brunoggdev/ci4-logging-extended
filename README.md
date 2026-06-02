@@ -120,7 +120,7 @@ protected function exception(): array
             'headers' => false,     // true = all headers; array of names = allow-list; false = off
             'redact'  => ['password', 'token', 'api_key', 'authorization', 'cookie', ...],
         ],
-        'context' => [
+        'captures' => [
             'user'    => fn () => ['id' => auth()->id(), 'email' => auth()->user()?->email],
             'session' => false,     // true = all session data; callable for specific keys
             'extra'   => ['tenant' => fn () => session('tenant_id')],
@@ -136,7 +136,7 @@ protected function exception(): array
 
 #### Rich exception context example
 
-With `user`, `request`, `context`, and `trace` enabled, a single `exception()` call produces:
+With `user`, `request`, `captures`, and `trace` enabled, a single `exception()` call produces:
 
 ```
 ERROR - 2026-03-20 14:32:01 --> [RuntimeException] Something went wrong | message="Something went wrong" location=/var/www/app/Services/OrderService.php:84 request={"method":"POST","url":"https://app.test/checkout"} user={"id":7,"email":"alice@example.com"} tenant=acme-corp
@@ -179,12 +179,25 @@ class SlackAlertHandler
     {
         Http::post(env('SLACK_WEBHOOK'), [
             'text' => "[{$alert->level}] {$alert->message}",
+            'user' => $alert->captures['user'] ?? null,
         ]);
     }
 }
 ```
 
-`LogAlert` carries `level`, `message`, `context`, and `timestamp`. A broken handler never takes down the logger — all calls are wrapped in try/catch and the file log is always written first.
+`LogAlert` exposes:
+
+| Property | Type | Description |
+|---|---|---|
+| `$level` | `string` | PSR-3 level in lowercase (`'error'`, `'critical'`, …) |
+| `$message` | `string` | Exception message or interpolated log message |
+| `$captures` | `array` | Your configured captures: `request`, `user`, `session`, and any `extra` keys |
+| `$context` | `array` | Everything else: CI4 native keys (`routeInfo`, `exFile`, …) and any key/value pairs passed to plain `logger()->*()` calls |
+| `$timestamp` | `Time` | Alert time in the app timezone |
+| `$exception` | `?Throwable` | The raw exception, when triggered via `exception()` or CI4's native handler |
+| `$location` | `?string` | `file.php:line` of the throw site, smart-resolved for named constructors |
+
+A broken handler never takes down the logger — all calls are wrapped in try/catch and the file log is always written first.
 
 `throttle` accepts any duration using CI4's time constants (`15 * MINUTE`, `2 * HOUR`, etc.) and uses an isolated file cache — never touches your app's cache store — to suppress repeat alerts for the same level + message within that window. If a handler returns `false`, the throttle lock is not saved — use this to signal that the alert was not delivered so the next occurrence gets another chance.
 

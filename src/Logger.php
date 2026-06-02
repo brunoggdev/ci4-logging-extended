@@ -30,6 +30,28 @@ class Logger extends CI4Logger
     private static ?CacheInterface $alertCache = null;
 
     /**
+     * Context keys we add in buildExceptionContext() that must NOT appear in LogAlert::$context.
+     * 'message' and 'location' are promoted to dedicated LogAlert props.
+     * 'class' and 'trace' are redundant via $alert->exception.
+     */
+    private const ALERT_STRIP_KEYS = ['class', 'message', 'location', 'trace'];
+
+    /**
+     * Raw Throwable threaded from exception() to handleAlerts() without touching the
+     * PSR-3 context array. Cleared at the top of handleAlerts() before any work begins.
+     */
+    private ?Throwable $pendingException = null;
+
+    /**
+     * Names of context keys that hold our configured captures (request, user, session, extra).
+     * Key names only — values stay in the $context array to avoid duplication.
+     * Set by buildExceptionContext(); empty for plain logger calls and CI4's native handler path.
+     *
+     * @var string[]
+     */
+    private array $pendingCaptureKeys = [];
+
+    /**
      * Logs a caught Throwable with rich context: location, request, user, trace.
      *
      * Behaviour is driven by Config\LoggingExtended. Override this method in a
@@ -48,21 +70,30 @@ class Logger extends CI4Logger
         $context = $this->buildExceptionContext($e, $config);
 
         if ($message !== null) {
-            // Custom message is the log line — don't leak the exception's message into context
+            // Custom message is the log line — don't leak the exception's own message into context
             unset($context['message']);
         }
 
+        $this->pendingException = $e;
         $this->log($level, '[{class}] ' . ($message ?? '{message}'), $context);
     }
 
     /**
-     * Builds the full context array for an exception log entry.
+     * Builds the flat context array for an exception log entry.
      * Separated so subclasses can call it when extending exception().
+     *
+     * We serialize exception data into context keys so placeholders like {class} and {message}
+     * work in the log template and the file format stays consistent with CI4's own handler.
+     * The raw Throwable is threaded separately via $pendingException.
+     * Capture keys (request, user, session, extra) are tracked in $pendingCaptureKeys so
+     * handleAlerts() can split them into LogAlert::$captures without duplicating their values.
      */
     protected function buildExceptionContext(Throwable $e, LoggingExtended $config): array
     {
         $req = $config->exception['request'];
-        $ctx = $config->exception['context'];
+        $cap = $config->exception['captures'];
+
+        $this->pendingCaptureKeys = [];
 
         $context = [
             'class'    => $e::class,
@@ -71,8 +102,8 @@ class Logger extends CI4Logger
         ];
 
         if ($req['enabled'] && ! is_cli()) {
-            $request            = service('request');
-            $context['request'] = [
+            $request     = service('request');
+            $requestData = [
                 'method' => $request->getMethod(),
                 'url'    => current_url(),
             ];
@@ -94,7 +125,7 @@ class Logger extends CI4Logger
                 }
 
                 if ($params !== []) {
-                    $context['params'] = $params;
+                    $requestData['params'] = $params;
                 }
             }
 
@@ -113,45 +144,52 @@ class Logger extends CI4Logger
                 }
 
                 if ($headers !== []) {
-                    $context['headers'] = $this->redactParams($headers, $req['redact']);
+                    $requestData['headers'] = $this->redactParams($headers, $req['redact']);
                 }
             }
+
+            $context['request']         = $requestData;
+            $this->pendingCaptureKeys[] = 'request';
         }
 
-        if (is_callable($ctx['user'])) {
+        if (is_callable($cap['user'])) {
             try {
-                $user = ($ctx['user'])();
+                $user = ($cap['user'])();
                 if ($user !== null) {
-                    $context['user'] = $user;
+                    $context['user']            = $user;
+                    $this->pendingCaptureKeys[] = 'user';
                 }
             } catch (Throwable) {
                 // Resolver threw — skip rather than crashing the logger itself
             }
         }
 
-        if ($ctx['session'] === true && ! is_cli()) {
-            // Guard: session() is not available in CLI contexts
+        if ($cap['session'] === true && ! is_cli()) {
             try {
-                $context['session'] = session()->get();
+                $session = session()->get();
+                $context['session']         = $session;
+                $this->pendingCaptureKeys[] = 'session';
             } catch (Throwable) {
                 // Session unavailable — skip
             }
-        } elseif (is_callable($ctx['session'])) {
+        } elseif (is_callable($cap['session'])) {
             try {
-                $session = ($ctx['session'])();
+                $session = ($cap['session'])();
                 if ($session !== null) {
-                    $context['session'] = $session;
+                    $context['session']         = $session;
+                    $this->pendingCaptureKeys[] = 'session';
                 }
             } catch (Throwable) {
                 // Resolver threw — skip rather than crashing the logger itself
             }
         }
 
-        foreach ($ctx['extra'] as $key => $resolver) {
+        foreach ($cap['extra'] as $key => $resolver) {
             try {
                 $value = $resolver();
                 if ($value !== null) {
-                    $context[$key] = $value;
+                    $context[$key]              = $value;
+                    $this->pendingCaptureKeys[] = $key;
                 }
             } catch (Throwable) {
                 // Resolver threw — skip rather than crashing the logger itself
@@ -159,6 +197,7 @@ class Logger extends CI4Logger
         }
 
         if ($config->exception['trace']) {
+            // trace goes to the log file only; handlers access it via $alert->exception->getTraceAsString()
             $context['trace'] = $e->getTraceAsString();
         }
 
@@ -187,9 +226,10 @@ class Logger extends CI4Logger
     /**
      * Overrides CI4's log() to dispatch alert handlers after writing to file.
      *
-     * Alert handlers are only called when the level matches `alertLevels` in config.
-     * Each handler is resolved as: callable, invokable class, or class with handle().
-     * A broken handler never takes down the logger — all calls are wrapped in try/catch.
+     * Three call paths land here:
+     *  - Our exception(): $pendingException and $pendingCaptureKeys are pre-loaded.
+     *  - CI4's native exception handler: Throwable arrives via $context['exception'] (PSR-3).
+     *  - Plain logger calls: no exception, no captures — context passes through as-is.
      *
      * @param string $level
      * @param string $message
@@ -197,52 +237,88 @@ class Logger extends CI4Logger
     public function log($level, $message, array $context = []): void
     {
         parent::log($level, $message, $context);
+        $this->handleAlerts($level, $message, $context);
+    }
+
+    /**
+     * Builds and dispatches a LogAlert when the level and handler config warrant it.
+     *
+     * Pending props are read and cleared first so any re-entrant log() call during
+     * handler execution starts with a clean slate. A broken handler never takes down
+     * the logger — all calls are wrapped in try/catch. A handler returning false opts
+     * out of throttling for that call.
+     */
+    private function handleAlerts(string $level, string $message, array $context): void
+    {
+        $captureKeys = $this->pendingCaptureKeys;
+        $exception   = $this->pendingException ?? $context['exception'] ?? null;
+
+        $this->pendingCaptureKeys = [];
+        $this->pendingException   = null;
 
         /** @var LoggingExtended $config */
-        $config = config('LoggingExtended');
-
-        $alerts = $config->exception['alerts'];
+        $alerts = config('LoggingExtended')->exception['alerts'];
 
         if ($alerts['handlers'] === [] || $alerts['levels'] === []) {
             return;
         }
 
-        if (! in_array(strtolower((string) $level), $alerts['levels'], true)) {
+        $level = strtolower($level);
+
+        if (! in_array($level, $alerts['levels'], true)) {
             return;
         }
 
         $throttle = (int) $alerts['throttle'];
+        $cacheKey = $throttle > 0 ? 'lv_alert_' . md5($level . $message) : null;
 
-        if ($throttle > 0) {
-            $cacheKey = 'lv_alert_' . md5($level . $message);
-            if ($this->alertCache()->get($cacheKey) !== null) {
-                return;
-            }
+        if ($cacheKey !== null && $this->alertCache()->get($cacheKey) !== null) {
+            return;
         }
 
+        // For our exception() path location is pre-computed; for CI4's native handler path
+        // the Throwable is in $context['exception'] and we resolve it here.
+        $location = $context['location'] ?? null;
+        if ($location === null && $exception !== null) {
+            $location = $this->resolveExceptionLocation($exception);
+        }
+
+        // For exception() calls $context['message'] holds the clean exception message;
+        // for plain calls we interpolate the template.
+        $alertMessage = $context['message'] ?? parent::interpolate($message, $context);
+
+        $captures = array_intersect_key($context, array_flip($captureKeys));
+
+        // $context receives everything we didn't put there: CI4 native keys (exception,
+        // exFile, exLine, routeInfo…) and user-provided pairs from plain logger calls.
+        $alertContext = array_diff_key(
+            $context,
+            array_flip([...self::ALERT_STRIP_KEYS, ...$captureKeys]),
+        );
+
         $alert = new LogAlert(
-            level:     strtolower((string) $level),
-            message:   (string) $message,
-            context:   $context,
+            level:     $level,
+            message:   $alertMessage,
+            captures:  $captures,
+            context:   $alertContext,
             timestamp: \CodeIgniter\I18n\Time::now(),
+            exception: $exception,
+            location:  $location,
         );
 
         $delivered = false;
 
         foreach ($alerts['handlers'] as $handler) {
+            $result = null;
             try {
                 if (is_callable($handler)) {
                     $result = $handler($alert);
                 } elseif (is_string($handler)) {
                     $instance = new $handler();
-                    if (is_callable($instance)) {
-                        $result = $instance($alert);
-                    } else {
-                        $result = $instance->handle($alert);
-                    }
+                    $result   = is_callable($instance) ? $instance($alert) : $instance->handle($alert);
                 }
 
-                if (($result ?? null) !== false) {
+                if ($result !== false) {
                     $delivered = true;
                 }
             } catch (Throwable) {
@@ -250,7 +326,7 @@ class Logger extends CI4Logger
             }
         }
 
-        if ($throttle > 0 && $delivered) {
+        if ($cacheKey !== null && $delivered) {
             $this->alertCache()->save($cacheKey, true, $throttle);
         }
     }
@@ -258,15 +334,15 @@ class Logger extends CI4Logger
     /**
      * Returns the location where the exception was thrown.
      * For the common case this is $e->getFile():$e->getLine() directly.
-     * When the exception is thrown from within its own class (e.g. a factory/named-constructor
-     * pattern), it walks the trace to find the first call site outside that class file.
+     * For factory/named-constructor patterns, walks the trace to find the first call site
+     * outside the exception class file — handles inherited named constructors too.
      */
     private function resolveExceptionLocation(Throwable $e): string
     {
         foreach ($e->getTrace() as $frame) {
             if (
-                isset($frame['file'])
-                && ($frame['class'] ?? '') === $e::class
+                isset($frame['file'], $frame['class'])
+                && is_a($e, $frame['class'])
                 && $frame['file'] !== $e->getFile()
             ) {
                 return $frame['file'] . ':' . ($frame['line'] ?? 0);
@@ -276,10 +352,7 @@ class Logger extends CI4Logger
         return $e->getFile() . ':' . $e->getLine();
     }
 
-    /**
-     * Returns the isolated file cache used for alert throttling.
-     * Initialised once and shared across all calls (static property).
-     */
+    /** Returns the isolated file cache used for alert throttling. */
     private function alertCache(): CacheInterface
     {
         if (self::$alertCache === null) {

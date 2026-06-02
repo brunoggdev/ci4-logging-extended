@@ -103,7 +103,7 @@ class LoggingExtendedPublish extends BaseCommand
                                         ],
                                     ],
 
-                                    'context' => [
+                                    'captures' => [
                                         // Callable returning user data — enables user.id=, user.email= search
                                         // e.g. fn() => ['id' => auth()->id(), 'email' => auth()->user()?->email]
                                         'user' => null,
