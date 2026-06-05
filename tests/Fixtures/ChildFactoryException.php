@@ -9,4 +9,6 @@ namespace Brunoggdev\LoggingExtended\Tests\Fixtures;
  * PHP's trace records the declaring class (FactoryException), not this subclass,
  * so a naive $frame['class'] === $e::class check would fail to find the call site.
  */
-class ChildFactoryException extends FactoryException {}
+class ChildFactoryException extends FactoryException
+{
+}

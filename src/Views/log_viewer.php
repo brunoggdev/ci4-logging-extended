@@ -1,44 +1,35 @@
 <?php
+
+use Brunoggdev\LoggingExtended\Config\LoggingExtended;
+
 /**
- * @var list<array{name:string,size:string,isToday:bool}>                                                  $logFiles
- * @var string|null                                                                                         $filename
+ * @var list<array{name:string,size:string,isToday:bool}>                                                                            $logFiles
+ * @var string|null                                                                                                                  $filename
  * @var list<array{level:string,datetime:string,message:string,context:array,stacktrace:list<string>,occurrence:int,total:int}>|null $entries
- * @var array<string,int>                                                                                   $levelCounts
- * @var list<string>                                                                                        $activeLevels
- * @var string                                                                                              $searchQuery
- * @var int                                                                                                 $page
- * @var int                                                                                                 $totalPages
- * @var int                                                                                                 $total
- * @var int                                                                                                 $perPage
- * @var bool                                                                                                $isToday
- * @var \Brunoggdev\LoggingExtended\Config\LoggingExtended                                                  $viewerConfig
+ * @var array<string,int>                                                                                                            $levelCounts
+ * @var list<string>                                                                                                                 $activeLevels
+ * @var string                                                                                                                       $searchQuery
+ * @var int                                                                                                                          $page
+ * @var int                                                                                                                          $totalPages
+ * @var int                                                                                                                          $total
+ * @var int                                                                                                                          $perPage
+ * @var bool                                                                                                                         $isToday
+ * @var LoggingExtended                                                                                                              $viewerConfig
  */
 
 // Guard all view helper functions against fatal "Cannot redeclare" errors if the
 // view is ever included more than once (e.g. in tests or SSE partial renders).
-if (! function_exists('ideLink')) {
-    function ideLink(string $ide, string $file, string $line, ?string $wslDistro = null, ?string $serverPath = null, ?string $localPath = null): ?string
-    {
-        if ($serverPath !== null && $localPath !== null) {
-            $file = str_replace($serverPath, $localPath, $file);
-        }
-
-        return match ($ide) {
-            'vscode' => $wslDistro
-                ? 'vscode://vscode-remote/wsl+' . $wslDistro . $file . ':' . $line
-                : 'vscode://file/' . $file . ':' . $line,
-            'phpstorm' => 'phpstorm://open?file=' . urlencode($file) . '&line=' . $line,
-            default    => null,
-        };
-    }
-}
-
+//
+// Deep links are resolved client-side (see log_viewer_foot.php): each developer's
+// editor/path lives in their own browser, so the server only emits the raw file +
+// line as data attributes and the JS builds the vscode:// / phpstorm:// URL.
 if (! function_exists('parseStackFrame')) {
     function parseStackFrame(string $frame): ?array
     {
         if (preg_match('/#\d+ (\/[^(]+)\((\d+)\)/', $frame, $m)) {
             return ['file' => $m[1], 'line' => $m[2]];
         }
+
         return null;
     }
 }
@@ -48,9 +39,9 @@ if (! function_exists('levelBadgeClass')) {
     {
         return match (true) {
             in_array($level, ['emergency', 'alert', 'critical', 'error'], true) => 'text-bg-danger',
-            $level === 'warning'                                                 => 'text-bg-warning',
+            $level === 'warning'                                                => 'text-bg-warning',
             in_array($level, ['notice', 'info'], true)                          => 'text-bg-info',
-            default                                                              => 'text-bg-secondary',
+            default                                                             => 'text-bg-secondary',
         };
     }
 }
@@ -60,9 +51,9 @@ if (! function_exists('levelColor')) {
     {
         return match (true) {
             in_array($level, ['emergency', 'alert', 'critical', 'error'], true) => 'danger',
-            $level === 'warning'                                                 => 'warning',
+            $level === 'warning'                                                => 'warning',
             in_array($level, ['notice', 'info'], true)                          => 'info',
-            default                                                              => 'secondary',
+            default                                                             => 'secondary',
         };
     }
 }
@@ -72,9 +63,9 @@ if (! function_exists('levelTextClass')) {
     {
         return match (true) {
             in_array($level, ['emergency', 'alert', 'critical', 'error'], true) => 'text-danger',
-            $level === 'warning'                                                 => 'text-warning',
+            $level === 'warning'                                                => 'text-warning',
             in_array($level, ['notice', 'info'], true)                          => 'text-info',
-            default                                                              => 'text-secondary',
+            default                                                             => 'text-secondary',
         };
     }
 }
@@ -84,12 +75,12 @@ if (! function_exists('levelIcon')) {
     {
         return match (true) {
             in_array($level, ['emergency', 'alert'], true) => 'bi-exclamation-octagon-fill',
-            $level === 'critical'                           => 'bi-exclamation-diamond-fill',
-            $level === 'error'                              => 'bi-exclamation-circle-fill',
-            $level === 'warning'                            => 'bi-exclamation-triangle-fill',
-            $level === 'notice'                             => 'bi-info-square-fill',
-            $level === 'info'                               => 'bi-info-circle-fill',
-            default                                         => 'bi-bug-fill',
+            $level === 'critical'                          => 'bi-exclamation-diamond-fill',
+            $level === 'error'                             => 'bi-exclamation-circle-fill',
+            $level === 'warning'                           => 'bi-exclamation-triangle-fill',
+            $level === 'notice'                            => 'bi-info-square-fill',
+            $level === 'info'                              => 'bi-info-circle-fill',
+            default                                        => 'bi-bug-fill',
         };
     }
 }
@@ -101,7 +92,7 @@ if (! function_exists('lvUrl')) {
             'page'   => $page > 1 ? $page : null,
             'levels' => $levels !== [] ? implode(',', $levels) : null,
             'q'      => $query !== '' ? $query : null,
-        ], fn ($v) => $v !== null);
+        ], static fn ($v) => $v !== null);
 
         return site_url($basePath . '/' . $filename) . ($params ? '?' . http_build_query($params) : '');
     }
@@ -113,7 +104,7 @@ if (! function_exists('lvToggleLevelUrl')) {
         if ($level === 'all') {
             $new = [];
         } elseif (in_array($level, $activeLevels, true)) {
-            $new = array_values(array_filter($activeLevels, fn ($l) => $l !== $level));
+            $new = array_values(array_filter($activeLevels, static fn ($l) => $l !== $level));
         } else {
             $new = [...$activeLevels, $level];
         }
@@ -136,16 +127,23 @@ include __DIR__ . '/log_viewer_head.php';
     <!-- ── Sidebar ──────────────────────────────────────────────────────── -->
     <aside class="lv-sidebar d-flex flex-column border-end bg-body-tertiary flex-shrink-0" style="width:260px">
 
-        <div class="p-3 border-bottom d-flex align-items-center gap-2">
-            <span class="fw-semibold me-auto"><i class="bi bi-journal-text me-1"></i>Log Viewer</span>
-            <select id="lv-bsw" class="form-select form-select-sm" style="width:auto" aria-label="Bootswatch theme">
-                <?php foreach (['brite','cerulean','cosmo','cyborg','darkly','flatly','litera','lumen','materia','minty','pulse','sandstone','simplex','sketchy','slate','solar','spacelab','superhero','united','vapor','yeti','zephyr'] as $t): ?>
-                    <option value="<?= $t ?>"><?= ucfirst($t) ?></option>
-                <?php endforeach ?>
-            </select>
-            <button id="lv-theme-btn" class="btn btn-sm btn-outline-secondary flex-shrink-0" aria-label="Toggle dark/light">
-                <i id="lv-theme-icon" class="bi bi-sun-fill"></i>
-            </button>
+        <div class="p-3 border-bottom">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="fw-semibold me-auto"><i class="bi bi-journal-text me-1"></i>Log Viewer</span>
+                <button id="lv-settings-btn" class="btn btn-sm btn-outline-secondary flex-shrink-0" aria-label="Settings" title="Settings">
+                    <i class="bi bi-gear"></i>
+                </button>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <select id="lv-bsw" class="form-select form-select-sm flex-grow-1" aria-label="Bootswatch theme">
+                    <?php foreach (['brite', 'cerulean', 'cosmo', 'cyborg', 'darkly', 'flatly', 'litera', 'lumen', 'materia', 'minty', 'pulse', 'sandstone', 'simplex', 'sketchy', 'slate', 'solar', 'spacelab', 'superhero', 'united', 'vapor', 'yeti', 'zephyr'] as $t): ?>
+                        <option value="<?= $t ?>"><?= ucfirst($t) ?></option>
+                    <?php endforeach ?>
+                </select>
+                <button id="lv-theme-btn" class="btn btn-sm btn-outline-secondary flex-shrink-0" aria-label="Toggle dark/light">
+                    <i id="lv-theme-icon" class="bi bi-sun-fill"></i>
+                </button>
+            </div>
         </div>
 
         <div class="px-2 py-2 border-bottom d-flex gap-2">
@@ -163,7 +161,7 @@ include __DIR__ . '/log_viewer_head.php';
             <?php else: ?>
                 <?php foreach ($logFiles as $file):
                     $isActive = $file['name'] === ($filename ?? '');
-                ?>
+                    ?>
                     <div class="lv-file-item d-flex align-items-center border-bottom <?= $isActive ? 'bg-primary-subtle' : '' ?>"
                          data-name="<?= esc($file['name']) ?>">
                         <label class="lv-file-check align-items-center ps-2 mb-0" style="cursor:pointer">
@@ -250,7 +248,7 @@ include __DIR__ . '/log_viewer_head.php';
                     </a>
                     <?php foreach ($presentLevels as $level):
                         $levelActive = $allActive || in_array($level, $activeLevels, true);
-                    ?>
+                        ?>
                         <a href="<?= esc(lvToggleLevelUrl($basePath, $filename, $level, $activeLevels, $searchQuery)) ?>"
                            class="btn btn-sm btn-outline-<?= levelColor($level) ?> <?= $levelActive ? 'active' : '' ?> lv-level-btn">
                             <i class="bi <?= $levelActive ? 'bi-check2-square' : 'bi-square' ?> me-1"></i><?= ucfirst($level) ?>
@@ -280,20 +278,16 @@ include __DIR__ . '/log_viewer_head.php';
                             <tr><td colspan="5" class="text-center text-body-secondary py-5">No entries found.</td></tr>
                         <?php endif ?>
                             <?php foreach ($entries as $index => $entry):
-                                $rowId      = 'e-' . (($page - 1) * $perPage + $index);
-                                $location   = $entry['context']['location'] ?? null;
-                                $hasIdeLink = $deeplink['ide'] !== null && $location !== null;
-                                $link       = null;
-                                $locFile    = null;
-                                $locLine    = null;
+                                $rowId    = 'e-' . (($page - 1) * $perPage + $index);
+                                $location = $entry['context']['location'] ?? null;
+                                $locFile  = null;
+                                $locLine  = null;
 
-                                if ($hasIdeLink) {
-                                    $colonPos = strrpos($location, ':');
-                                    $locFile  = substr($location, 0, $colonPos);
-                                    $locLine  = substr($location, $colonPos + 1);
-                                    $link     = ideLink($deeplink['ide'], $locFile, $locLine, $deeplink['wslDistro'], $deeplink['serverPath'] ?? null, $deeplink['localPath'] ?? null);
+                                if ($location !== null && ($colonPos = strrpos($location, ':')) !== false) {
+                                    $locFile = substr($location, 0, $colonPos);
+                                    $locLine = substr($location, $colonPos + 1);
                                 }
-                            ?>
+                                ?>
                                 <tr class="lv-row" id="<?= $rowId ?>" data-level="<?= esc($entry['level']) ?>">
                                     <td class="<?= levelTextClass($entry['level']) ?> text-center ps-3 pe-0">
                                         <i class="bi <?= levelIcon($entry['level']) ?>"></i>
@@ -316,23 +310,15 @@ include __DIR__ . '/log_viewer_head.php';
                                         </div>
                                         <?php if (! empty($entry['context'])): ?>
                                             <?php
-                                            $ctxOther  = array_diff_key($entry['context'], ['location' => 1, 'request' => 1]);
-                                            $hasInline = isset($entry['context']['location']) || isset($entry['context']['request']);
+                                                $ctxOther = array_diff_key($entry['context'], ['location' => 1, 'request' => 1]);
+                                            $hasInline    = isset($entry['context']['location']) || isset($entry['context']['request']);
                                             ?>
                                             <?php if ($hasInline): ?>
                                                 <div class="d-flex flex-wrap gap-1 mt-1">
                                                     <?php if (isset($entry['context']['location'])): ?>
                                                         <span class="ctx-pill">
                                                             <span class="opacity-75">location=</span>
-                                                            <span class="text-primary">
-                                                                <?php if ($link !== null): ?>
-                                                                    <a href="<?= esc($link) ?>" class="link-primary text-decoration-none" title="Open in IDE">
-                                                                        <?= esc(basename($locFile)) ?>:<?= esc($locLine) ?>
-                                                                    </a>
-                                                                <?php else: ?>
-                                                                    <?= esc($entry['context']['location']) ?>
-                                                                <?php endif ?>
-                                                            </span>
+                                                            <span class="text-primary lv-loc"<?= $locFile !== null ? ' data-file="' . esc($locFile, 'attr') . '" data-line="' . esc($locLine, 'attr') . '"' : '' ?>><?= esc($entry['context']['location']) ?></span>
                                                         </span>
                                                     <?php endif ?>
                                                     <?php if (isset($entry['context']['request'])): ?>
@@ -353,7 +339,7 @@ include __DIR__ . '/log_viewer_head.php';
                                                 $ctxKeys     = array_keys($ctxOther);
                                                 $ctxOrdered  = array_merge(
                                                     array_intersect($ctxPriority, $ctxKeys),
-                                                    array_diff($ctxKeys, $ctxPriority)
+                                                    array_diff($ctxKeys, $ctxPriority),
                                                 );
                                                 ?>
                                                 <details class="stacktrace">
@@ -363,7 +349,7 @@ include __DIR__ . '/log_viewer_head.php';
                                                             <?php foreach ($ctxOrdered as $key):
                                                                 $val = $ctxOther[$key];
                                                                 $raw = is_array($val) ? json_encode($val, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : $val;
-                                                            ?>
+                                                                ?>
                                                                 <tr>
                                                                     <td class="ctx-row-key"><?= esc($key) ?></td>
                                                                     <td class="ctx-row-val"><?= esc($raw) ?></td>
@@ -380,17 +366,9 @@ include __DIR__ . '/log_viewer_head.php';
                                                 <div class="stacktrace-lines">
                                                     <?php foreach ($entry['stacktrace'] as $frame):
                                                         $frameData = parseStackFrame($frame);
-                                                        $frameLink = ($deeplink['ide'] && $frameData)
-                                                            ? ideLink($deeplink['ide'], $frameData['file'], $frameData['line'], $deeplink['wslDistro'], $deeplink['serverPath'] ?? null, $deeplink['localPath'] ?? null)
-                                                            : null;
-                                                    ?>
-                                                        <div class="stacktrace-line d-flex align-items-baseline gap-1">
+                                                        ?>
+                                                        <div class="stacktrace-line d-flex align-items-baseline gap-1"<?= $frameData ? ' data-file="' . esc($frameData['file'], 'attr') . '" data-line="' . esc($frameData['line'], 'attr') . '"' : '' ?>>
                                                             <span class="flex-grow-1"><?= esc($frame) ?></span>
-                                                            <?php if ($frameLink): ?>
-                                                                <a href="<?= esc($frameLink) ?>" class="text-body-secondary flex-shrink-0 lv-frame-link" title="Open in IDE">
-                                                                    <i class="bi bi-code-slash"></i>
-                                                                </a>
-                                                            <?php endif ?>
                                                         </div>
                                                     <?php endforeach ?>
                                                 </div>
@@ -505,10 +483,63 @@ include __DIR__ . '/log_viewer_head.php';
     </div>
 </div>
 
+<!-- ── Settings modal (per-browser preferences) ─────────────────────────── -->
+<div class="modal fade" id="lv-settings-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <span class="fw-bold"><i class="bi bi-gear me-2"></i>Settings</span>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <h6 class="text-uppercase text-body-secondary small fw-bold mb-1">IDE deep links</h6>
+                <p class="text-body-secondary small mb-3">
+                    Saved in this browser only — each developer sets their own. Leave a field
+                    blank to fall back to the app's configured default.
+                </p>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold mb-1" for="lv-dl-ide">Editor</label>
+                    <select id="lv-dl-ide" class="form-select form-select-sm">
+                        <option value="">Disabled</option>
+                        <option value="vscode">VS Code</option>
+                        <option value="phpstorm">PhpStorm</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold mb-1" for="lv-dl-local">Local project path</label>
+                    <input type="text" id="lv-dl-local" class="form-control form-control-sm font-monospace" placeholder="/home/you/projects/app/">
+                    <div class="form-text small">Path to this project on your machine. The server path is detected automatically and rewritten to this.</div>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label small fw-semibold mb-1" for="lv-dl-wsl">WSL distro</label>
+                    <input type="text" id="lv-dl-wsl" class="form-control form-control-sm font-monospace" placeholder="Ubuntu">
+                    <div class="form-text small">Only needed if you open this project with VS Code on WSL.</div>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" id="lv-settings-save" class="btn btn-sm btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 window.LV_CONFIG = <?= json_encode([
     'streamUrl' => $isToday ? site_url($basePath . '/stream') : null,
-    'deeplink'  => $viewerConfig->viewer['deeplink'],
+    'deeplink'  => [
+        // serverPath: explicit config override, else auto-detected from the
+        // running app's root. This is the only deeplink value the server knows;
+        // ide/wslDistro/localPath are per-developer and resolved in the browser.
+        'serverPath' => $deeplink['serverPath'] ?? ROOTPATH,
+        // First-run defaults seeded into each viewer's localStorage (deprecated:
+        // configure per-developer in the Settings panel instead).
+        'seed' => [
+            'ide'       => $deeplink['ide'] ?? null,
+            'wslDistro' => $deeplink['wslDistro'] ?? null,
+            'localPath' => $deeplink['localPath'] ?? null,
+        ],
+    ],
 ]) ?>;
 </script>
 

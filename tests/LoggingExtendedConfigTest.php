@@ -40,8 +40,8 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
 
     public function testValidateViewerExceptionMessageContainsAllMissingKeys(): void
     {
-        $config          = new LoggingExtended();
-        $config->viewer  = ['enabled' => true]; // only one key present
+        $config         = new LoggingExtended();
+        $config->viewer = ['enabled' => true]; // only one key present
 
         try {
             $config->validateViewer();
@@ -140,7 +140,7 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
         $config = new class () extends LoggingExtended {
             protected function viewer(): array
             {
-                return array_replace(parent::viewer(), ['gate' => fn () => true]);
+                return array_replace(parent::viewer(), ['gate' => static fn () => true]);
             }
         };
 
@@ -154,7 +154,7 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
         $config = new class () extends LoggingExtended {
             protected function viewer(): array
             {
-                return array_replace(parent::viewer(), ['gate' => fn () => false]);
+                return array_replace(parent::viewer(), ['gate' => static fn () => false]);
             }
         };
 
@@ -200,7 +200,7 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
         $config = new LoggingExtended();
         unset($config->viewer['routes']);
 
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/routes/');
 
         $config->validateViewer();
@@ -236,7 +236,7 @@ final class LoggingExtendedConfigTest extends CIUnitTestCase
         $config = new LoggingExtended();
         unset($config->exception['alerts']);
 
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/alerts/');
 
         $config->validateException();

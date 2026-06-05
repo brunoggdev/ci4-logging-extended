@@ -46,7 +46,7 @@ class LoggingExtendedPublish extends BaseCommand
                 | as a single coherent unit, with no need for a constructor or for splitting
                 | static declarations and dynamic overrides across two locations.
                 ------------------------------------------------------------------------ */
-                 
+
 
                 protected function viewer(): array
                 {
@@ -66,10 +66,11 @@ class LoggingExtendedPublish extends BaseCommand
                                         'filters' => [],
                                     ],
 
-                                    // IDE deep links for stack frames — set wslDistro if on WSL
-                                    // e.g. 'wslDistro' => env('LE_WSL_DISTRO')
-                                    // Set serverPath + localPath to rewrite server paths to your local equivalent
-                                    // e.g. 'serverPath' => '/var/www/myapp/', 'localPath' => env('LE_LOCAL_PATH')
+                                    // IDE deep links for stack frames. Each developer configures
+                                    // their own editor/path in the viewer's settings panel (saved
+                                    // in their browser) — the values below only seed first-run defaults.
+                                    //   serverPath: null = auto-detected from ROOTPATH. Set it only for
+                                    //   symlinked releases / containers where the logged paths differ.
                                     'deeplink' => [
                                         'ide'        => 'vscode',
                                         'wslDistro'  => null,

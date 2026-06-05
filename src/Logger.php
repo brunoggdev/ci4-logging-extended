@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Brunoggdev\LoggingExtended;
 
 use Brunoggdev\LoggingExtended\Config\LoggingExtended;
-use Brunoggdev\LoggingExtended\LogAlert;
 use CodeIgniter\Cache\CacheFactory;
 use CodeIgniter\Cache\CacheInterface;
+use CodeIgniter\I18n\Time;
 use CodeIgniter\Log\Logger as CI4Logger;
 use Config\Cache as CacheConfig;
 use Throwable;
@@ -26,15 +26,17 @@ use Throwable;
  */
 class Logger extends CI4Logger
 {
-    /** Isolated file cache for alert throttling — shared across all Logger instances. */
-    private static ?CacheInterface $alertCache = null;
-
     /**
      * Context keys we add in buildExceptionContext() that must NOT appear in LogAlert::$context.
      * 'message' and 'location' are promoted to dedicated LogAlert props.
      * 'class' and 'trace' are redundant via $alert->exception.
      */
     private const ALERT_STRIP_KEYS = ['class', 'message', 'location', 'trace'];
+
+    /**
+     * Isolated file cache for alert throttling — shared across all Logger instances.
+     */
+    private static ?CacheInterface $alertCache = null;
 
     /**
      * Raw Throwable threaded from exception() to handleAlerts() without touching the
@@ -47,7 +49,7 @@ class Logger extends CI4Logger
      * Key names only — values stay in the $context array to avoid duplication.
      * Set by buildExceptionContext(); empty for plain logger calls and CI4's native handler path.
      *
-     * @var string[]
+     * @var list<string>
      */
     private array $pendingCaptureKeys = [];
 
@@ -139,7 +141,7 @@ class Logger extends CI4Logger
                     }
 
                     $headers[$name] = is_array($header)
-                        ? implode(', ', array_map(fn ($h) => $h->getValueLine(), $header))
+                        ? implode(', ', array_map(static fn ($h) => $h->getValueLine(), $header))
                         : $header->getValueLine();
                 }
 
@@ -166,7 +168,7 @@ class Logger extends CI4Logger
 
         if ($cap['session'] === true && ! is_cli()) {
             try {
-                $session = session()->get();
+                $session                    = session()->get();
                 $context['session']         = $session;
                 $this->pendingCaptureKeys[] = 'session';
             } catch (Throwable) {
@@ -214,7 +216,7 @@ class Logger extends CI4Logger
     {
         $lower = array_map('strtolower', $redactedKeys);
 
-        array_walk_recursive($params, static function (mixed &$val, string|int $key) use ($lower): void {
+        array_walk_recursive($params, static function (mixed &$val, int|string $key) use ($lower): void {
             if (in_array(strtolower((string) $key), $lower, true)) {
                 $val = '[REDACTED]';
             }
@@ -297,19 +299,20 @@ class Logger extends CI4Logger
         );
 
         $alert = new LogAlert(
-            level:     $level,
-            message:   $alertMessage,
-            captures:  $captures,
-            context:   $alertContext,
-            timestamp: \CodeIgniter\I18n\Time::now(),
+            level: $level,
+            message: $alertMessage,
+            captures: $captures,
+            context: $alertContext,
+            timestamp: Time::now(),
             exception: $exception,
-            location:  $location,
+            location: $location,
         );
 
         $delivered = false;
 
         foreach ($alerts['handlers'] as $handler) {
             $result = null;
+
             try {
                 if (is_callable($handler)) {
                     $result = $handler($alert);
@@ -352,7 +355,9 @@ class Logger extends CI4Logger
         return $e->getFile() . ':' . $e->getLine();
     }
 
-    /** Returns the isolated file cache used for alert throttling. */
+    /**
+     * Returns the isolated file cache used for alert throttling.
+     */
     private function alertCache(): CacheInterface
     {
         if (self::$alertCache === null) {
@@ -412,6 +417,7 @@ class Logger extends CI4Logger
             // Trace goes on its own lines, not inline
             if ($key === 'trace' && is_string($val)) {
                 $trace = $val;
+
                 continue;
             }
 

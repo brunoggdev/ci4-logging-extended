@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Brunoggdev\LoggingExtended\Config;
 
 use CodeIgniter\Config\BaseConfig;
+use RuntimeException;
 
 class LoggingExtended extends BaseConfig
 {
@@ -50,9 +51,17 @@ class LoggingExtended extends BaseConfig
      * - **routes**:   - `path`: URL path where the viewer is accessible (e.g. 'logs' → your-app.test/logs)
      *                 - `filters`: CI4 filter aliases applied before the gate. Example: ['auth']
      * - **deeplink**: IDE deep link configuration for stack frame links.
-     *                 - `ide`: 'vscode', 'phpstorm', or null to disable
-     *                 - `wslDistro`: VSCode WSL distro name e.g. 'Ubuntu'
-     *                 - `serverPath` / `localPath`: rewrite server paths to local equivalents
+     *                 Resolution happens per-developer in each viewer's browser
+     *                 (stored in localStorage). The values below only seed a
+     *                 developer's first-run defaults — they can override them in
+     *                 the viewer's settings panel without touching this file.
+     *                 - `ide`: 'vscode', 'phpstorm', or null — seeds the default editor
+     *                 - `wslDistro`: VSCode WSL distro name e.g. 'Ubuntu' — seed
+     *                 - `localPath`: developer's local project path — seed
+     *                 - `serverPath`: server path prefix rewritten to localPath;
+     *                   null = auto-detect from ROOTPATH (covers most deploys; set
+     *                   it only for symlinked releases / containers where ROOTPATH
+     *                   does not match the paths recorded in the logs)
      * - **perPage**:  Entries per page.
      *
      * @return array{enabled: bool, gate: callable|string|null, routes: array{path: string, filters: list<string>}, deeplink: array{ide: string|null, wslDistro: string|null, serverPath: string|null, localPath: string|null}, perPage: int}
@@ -60,9 +69,9 @@ class LoggingExtended extends BaseConfig
     protected function viewer(): array
     {
         return [
-            'enabled'  => true,
-            'gate'     => fn () => ENVIRONMENT === 'development',
-            'routes'   => [
+            'enabled' => true,
+            'gate'    => static fn () => ENVIRONMENT === 'development',
+            'routes'  => [
                 'path'    => 'logs',
                 'filters' => [],
             ],
@@ -72,7 +81,7 @@ class LoggingExtended extends BaseConfig
                 'serverPath' => null,
                 'localPath'  => null,
             ],
-            'perPage'  => 50,
+            'perPage' => 50,
         ];
     }
 
@@ -112,7 +121,7 @@ class LoggingExtended extends BaseConfig
                 'session' => false,
                 'extra'   => [],
             ],
-            'alerts'  => [
+            'alerts' => [
                 'handlers' => [],
                 'levels'   => [],
                 'throttle' => 15 * MINUTE,
@@ -123,7 +132,7 @@ class LoggingExtended extends BaseConfig
     /**
      * Validates that all required viewer config keys are present.
      *
-     * @throws \RuntimeException
+     * @throws RuntimeException
      */
     public function validateViewer(): void
     {
@@ -131,9 +140,9 @@ class LoggingExtended extends BaseConfig
         $missing  = array_diff($required, array_keys($this->viewer));
 
         if ($missing !== []) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'LoggingExtended::viewer() is missing key(s): ' . implode(', ', $missing) . '. '
-                . 'Run `php spark logging-extended:publish` to regenerate your config.'
+                . 'Run `php spark logging-extended:publish` to regenerate your config.',
             );
         }
     }
@@ -141,7 +150,7 @@ class LoggingExtended extends BaseConfig
     /**
      * Validates that all required exception config keys are present.
      *
-     * @throws \RuntimeException
+     * @throws RuntimeException
      */
     public function validateException(): void
     {
@@ -149,9 +158,9 @@ class LoggingExtended extends BaseConfig
         $missing  = array_diff($required, array_keys($this->exception));
 
         if ($missing !== []) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 'LoggingExtended::exception() is missing key(s): ' . implode(', ', $missing) . '. '
-                . 'Run `php spark logging-extended:publish` to regenerate your config.'
+                . 'Run `php spark logging-extended:publish` to regenerate your config.',
             );
         }
     }

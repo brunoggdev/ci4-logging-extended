@@ -28,9 +28,8 @@ php spark logging-extended:publish
 
 >💡**Tip:** since config values are returned from methods, `env()` works anywhere in your config. There's no forced convention, but `LE_` is a natural prefix if you want one:
 > ```php
-> 'enabled'   => (bool) env('LE_VIEWER_ENABLED', true),
-> 'wslDistro' => env('LE_WSL_DISTRO'),
-> 'perPage'   => (int) env('LE_PER_PAGE', 50),
+> 'enabled' => (bool) env('LE_VIEWER_ENABLED', true),
+> 'perPage' => (int) env('LE_PER_PAGE', 50),
 > ```
 
 ---
@@ -278,18 +277,30 @@ Multiple space-separated terms all must match (AND, not OR).
 
 ### IDE deep links
 
-Stack frame file paths in the viewer link directly to your IDE. Configure the `deeplink` section:
+Stack frame and `location` file paths in the viewer link directly to your editor (`vscode://` / `phpstorm://`).
+
+These settings are **per-developer and stored in the browser** — open the **⚙ Settings** panel (top of the sidebar) and set your editor, your local project path, and an optional WSL distro. Each developer configures their own once, which is what makes deep links work on a **shared staging/production** viewer: there's no single server-wide local path to fight over.
+
+The server path is **auto-detected** (`ROOTPATH`) and rewritten to your local path, so the same logs deep-link correctly on every machine. The first time you click a deep link without a local path set, the Settings panel opens automatically.
+
+The `deeplink` config block only seeds first-run defaults and handles one server-side edge case:
 
 ```php
 'deeplink' => [
-    'ide'        => 'vscode',      // 'vscode', 'phpstorm', or null to disable
-    'wslDistro'  => 'Ubuntu',      // WSL distro name, or null if not on WSL
-    'serverPath' => '/var/www/app/',         // path prefix as it appears in the logs
-    'localPath'  => '/home/user/projects/app/', // your local equivalent
+    // First-run defaults seeded into each viewer's browser. Developers override
+    // these in the Settings panel — no need to set them per environment.
+    'ide'        => 'vscode',   // 'vscode', 'phpstorm', or null
+    'wslDistro'  => null,       // WSL distro name (VS Code only)
+    'localPath'  => null,       // a developer's local project path
+
+    // Server path prefix rewritten to each developer's localPath.
+    // null = auto-detect from ROOTPATH (recommended). Set it only for symlinked
+    // releases or containers where the paths recorded in the logs differ.
+    'serverPath' => null,
 ],
 ```
 
-When `serverPath` and `localPath` are both set, links are rewritten from the server path to your local path. This covers Docker, VM, and WSL setups where file paths in logs differ from your local filesystem.
+> **Upgrading from a single-`localPath` setup?** Your existing `ide` / `wslDistro` / `localPath` values still apply as each browser's first-run defaults, so nothing breaks. Going forward, configure per-developer in the Settings panel; these seed keys are deprecated and will be removed in v2.
 
 ### Viewer configuration reference
 
@@ -303,11 +314,11 @@ protected function viewer(): array
             'path'    => 'logs',    // URL path where the viewer is accessible
             'filters' => [],        // CI4 filter aliases applied before the gate
         ],
-        'deeplink' => [
+        'deeplink' => [                 // first-run seeds; configured per-developer in Settings
             'ide'        => 'vscode',   // 'vscode', 'phpstorm', or null
             'wslDistro'  => null,       // WSL distro name (VSCode only)
-            'serverPath' => null,       // server-side path prefix to rewrite
-            'localPath'  => null,       // local path equivalent
+            'localPath'  => null,       // a developer's local path
+            'serverPath' => null,       // null = auto-detect (ROOTPATH); set for symlink/container deploys
         ],
         'perPage'  => 50,           // entries per page
     ];

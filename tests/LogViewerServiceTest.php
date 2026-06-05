@@ -7,6 +7,7 @@ namespace Brunoggdev\LoggingExtended\Tests;
 use Brunoggdev\LoggingExtended\Services\LogViewerService;
 use CodeIgniter\Exceptions\PageNotFoundException;
 use CodeIgniter\Test\CIUnitTestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * @internal
@@ -202,10 +203,10 @@ final class LogViewerServiceTest extends CIUnitTestCase
                 'total'      => 1,
             ],
             [
-                'level'      => 'info',
-                'datetime'   => '2024-01-15 10:01:00',
-                'message'    => 'User logged in',
-                'context'    => [
+                'level'    => 'info',
+                'datetime' => '2024-01-15 10:01:00',
+                'message'  => 'User logged in',
+                'context'  => [
                     'user'    => ['id' => 7, 'email' => 'alice@example.com'],
                     'request' => ['method' => 'POST', 'url' => 'https://example.com/login'],
                 ],
@@ -214,10 +215,10 @@ final class LogViewerServiceTest extends CIUnitTestCase
                 'total'      => 1,
             ],
             [
-                'level'      => 'warning',
-                'datetime'   => '2024-01-15 10:02:00',
-                'message'    => 'Slow query detected',
-                'context'    => [
+                'level'    => 'warning',
+                'datetime' => '2024-01-15 10:02:00',
+                'message'  => 'Slow query detected',
+                'context'  => [
                     'query' => ['duration' => '2.3s', 'table' => 'orders'],
                 ],
                 'stacktrace' => [],
@@ -291,7 +292,7 @@ final class LogViewerServiceTest extends CIUnitTestCase
 
     public function testFilterEntriesMultiTermAndBothTermsMustMatch(): void
     {
-        $entries  = $this->makeEntries();
+        $entries = $this->makeEntries();
         // Both terms must match: only the "User logged in" entry matches both
         $filtered = $this->service->filterEntries($entries, [], 'User POST');
 
@@ -301,7 +302,7 @@ final class LogViewerServiceTest extends CIUnitTestCase
 
     public function testFilterEntriesMultiTermAndExcludesPartialMatch(): void
     {
-        $entries  = $this->makeEntries();
+        $entries = $this->makeEntries();
         // "logged" matches only the info entry; "Database" matches only the error entry — AND must fail
         $filtered = $this->service->filterEntries($entries, [], 'logged Database');
 
@@ -310,7 +311,7 @@ final class LogViewerServiceTest extends CIUnitTestCase
 
     public function testFilterEntriesTextSearchMatchesScalarContextKeyValuePair(): void
     {
-        $entries  = $this->makeEntries();
+        $entries = $this->makeEntries();
         // 'location' is a scalar context key — searching key=value should match
         $filtered = $this->service->filterEntries($entries, [], 'location=/app/Models');
 
@@ -328,7 +329,7 @@ final class LogViewerServiceTest extends CIUnitTestCase
 
     public function testFilterEntriesInvalidRegexFallsBackToLiteralMatch(): void
     {
-        $entries  = $this->makeEntries();
+        $entries = $this->makeEntries();
         // "(" is an invalid regex but should fall back to literal search without crashing
         $filtered = $this->service->filterEntries($entries, [], 'Database connection failed(');
 
@@ -346,9 +347,7 @@ final class LogViewerServiceTest extends CIUnitTestCase
         $this->assertSame('log-2024-01-15.log', $result);
     }
 
-    /**
-     * @dataProvider invalidFilenameProvider
-     */
+    #[DataProvider('provideSanitizeFilenameInvalidFilenameThrowsPageNotFoundException')]
     public function testSanitizeFilenameInvalidFilenameThrowsPageNotFoundException(string $filename): void
     {
         $this->expectException(PageNotFoundException::class);
@@ -359,7 +358,7 @@ final class LogViewerServiceTest extends CIUnitTestCase
     /**
      * @return array<string, array{string}>
      */
-    public static function invalidFilenameProvider(): array
+    public static function provideSanitizeFilenameInvalidFilenameThrowsPageNotFoundException(): iterable
     {
         return [
             'path traversal'    => ['../../etc/passwd'],

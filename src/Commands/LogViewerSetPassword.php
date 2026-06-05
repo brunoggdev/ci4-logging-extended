@@ -21,6 +21,7 @@ class LogViewerSetPassword extends BaseCommand
 
         if ($password !== $confirm) {
             CLI::error('Passwords do not match.');
+
             return;
         }
 
@@ -29,19 +30,20 @@ class LogViewerSetPassword extends BaseCommand
 
         if (! file_exists($envPath)) {
             CLI::error('.env file not found at: ' . $envPath);
+
             return;
         }
 
         $contents = file_get_contents($envPath);
         // Wrap in double quotes — bcrypt hashes contain $ which DotEnv would misinterpret unquoted
-        $line     = 'LOG_VIEWER_PASSWORD_HASH="' . $hash . '"';
+        $line = 'LOG_VIEWER_PASSWORD_HASH="' . $hash . '"';
 
         if (str_contains($contents, 'LOG_VIEWER_PASSWORD_HASH=')) {
             // Use a callback so $line is never interpreted as a preg replacement string —
             // bcrypt hashes contain $ which would be treated as backreferences otherwise.
             $contents = preg_replace_callback(
                 '/^LOG_VIEWER_PASSWORD_HASH=.*$/m',
-                fn () => $line,
+                static fn () => $line,
                 $contents,
             );
         } else {

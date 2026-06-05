@@ -8,6 +8,7 @@ use Brunoggdev\LoggingExtended\Config\LoggingExtended;
 use Brunoggdev\LoggingExtended\Services\LogViewerService;
 use CodeIgniter\Controller;
 use CodeIgniter\Exceptions\PageNotFoundException;
+use Throwable;
 
 class LogViewerController extends Controller
 {
@@ -66,7 +67,7 @@ class LogViewerController extends Controller
 
         $activeLevels = array_values(array_filter(
             explode(',', $this->request->getGet('levels') ?? ''),
-            fn ($l) => $l !== '',
+            static fn ($l) => $l !== '',
         ));
         $query   = trim($this->request->getGet('q') ?? '');
         $perPage = $this->config->viewer['perPage'];
@@ -104,6 +105,7 @@ class LogViewerController extends Controller
             if ($hash !== '' && password_verify($password, $hash)) {
                 $this->setLoginCookie();
                 $redirect = $this->request->getPost('redirect') ?: site_url($basePath);
+
                 return redirect()->to($redirect)->withCookies();
             }
 
@@ -132,6 +134,7 @@ class LogViewerController extends Controller
             $basePath = trim($this->config->viewer['routes']['path'], '/');
             $redirect = urlencode(current_url());
             header('Location: ' . site_url($basePath . '/login') . '?redirect=' . $redirect);
+
             exit;
         }
     }
@@ -202,7 +205,7 @@ class LogViewerController extends Controller
                     unlink($path);
                     $this->service->clearCache($path);
                 }
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 // Skip invalid or non-existent filenames silently
             }
         }
@@ -263,5 +266,4 @@ class LogViewerController extends Controller
 
         exit;
     }
-
 }

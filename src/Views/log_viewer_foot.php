@@ -3,7 +3,37 @@
 <script>
 (function () {
     var cfg = window.LV_CONFIG || {};
-    var dl = cfg.deeplink || {};
+
+    // ── Deep link settings (per-browser) ──────────────────────────────────
+    // serverPath is supplied by the server (auto-detected ROOTPATH or a config
+    // override). ide / wslDistro / localPath are per-developer and live in this
+    // browser's localStorage, seeded on first run from the app's defaults.
+    var DL_KEY     = 'lv-deeplink';
+    var PROMPT_KEY = 'lv-deeplink-prompted';
+    var dlCfg      = cfg.deeplink || {};
+    var serverPath = dlCfg.serverPath || '';
+    var deeplink   = loadDeeplink();
+
+    function loadDeeplink() {
+        var stored = null;
+        try { stored = JSON.parse(localStorage.getItem(DL_KEY)); } catch (e) {}
+        var src = (stored && typeof stored === 'object') ? stored : (dlCfg.seed || {});
+        return { ide: src.ide || '', wslDistro: src.wslDistro || '', localPath: src.localPath || '' };
+    }
+
+    function saveDeeplink(v) {
+        deeplink = { ide: v.ide || '', wslDistro: v.wslDistro || '', localPath: normalizeLocalPath(v.localPath || '') };
+        localStorage.setItem(DL_KEY, JSON.stringify(deeplink));
+    }
+
+    // serverPath (ROOTPATH) ends in a separator and the rewrite is a prefix
+    // replace, so localPath must end in one too — otherwise the join concatenates
+    // (e.g. /home/youapp/...). Append the matching separator if the user omitted it.
+    function normalizeLocalPath(p) {
+        p = (p || '').trim();
+        if (p === '' || /[\/\\]$/.test(p)) return p;
+        return p + (p.indexOf('\\') !== -1 && p.indexOf('/') === -1 ? '\\' : '/');
+    }
 
     // ── Bootswatch / theme switcher ───────────────────────────────────────
     var BSW_KEY   = 'lv-bootswatch';
@@ -40,6 +70,49 @@
         document.documentElement.setAttribute('data-bs-theme', next);
         localStorage.setItem(THEME_KEY, next);
         syncIcon();
+    });
+
+    // ── Settings modal (deep link preferences) ────────────────────────────
+    var settingsBtn     = document.getElementById('lv-settings-btn');
+    var settingsModalEl = document.getElementById('lv-settings-modal');
+    var settingsModal   = settingsModalEl ? new bootstrap.Modal(settingsModalEl) : null;
+    var dlIdeInput      = document.getElementById('lv-dl-ide');
+    var dlLocalInput    = document.getElementById('lv-dl-local');
+    var dlWslInput      = document.getElementById('lv-dl-wsl');
+
+    function openSettings() {
+        if (! settingsModal) return;
+        dlIdeInput.value   = deeplink.ide || '';
+        dlLocalInput.value = deeplink.localPath || '';
+        dlWslInput.value   = deeplink.wslDistro || '';
+        settingsModal.show();
+    }
+
+    if (settingsBtn) settingsBtn.addEventListener('click', openSettings);
+
+    var settingsSave = document.getElementById('lv-settings-save');
+    if (settingsSave) {
+        settingsSave.addEventListener('click', function () {
+            saveDeeplink({
+                ide:       dlIdeInput.value,
+                localPath: dlLocalInput.value.trim(),
+                wslDistro: dlWslInput.value.trim(),
+            });
+            applyDeeplinks(document);
+            if (settingsModal) settingsModal.hide();
+        });
+    }
+
+    // First click on an IDE link with no local path set opens the settings
+    // panel once. We don't block again afterwards, so links that already resolve
+    // locally (path matches the server) keep working without configuration.
+    document.addEventListener('click', function (e) {
+        if (! e.target.closest('.lv-ide-link')) return;
+        if (! deeplink.localPath && ! localStorage.getItem(PROMPT_KEY)) {
+            localStorage.setItem(PROMPT_KEY, '1');
+            e.preventDefault();
+            openSettings();
+        }
     });
 
     // ── Sidebar file filter ───────────────────────────────────────────────
@@ -110,6 +183,7 @@
                     var cur   = document.getElementById(id);
                     if (fresh && cur) cur.innerHTML = fresh.innerHTML;
                 });
+                applyDeeplinks(document.getElementById('log-tbody'));
                 if (push !== false) history.pushState(null, '', url);
             })
             .catch(function (err) {
@@ -265,6 +339,9 @@
         });
     });
 
+    // ── Wire deep links for the server-rendered rows ──────────────────────
+    applyDeeplinks(document);
+
     // ── Hash-based entry highlight on load ────────────────────────────────
     if (location.hash) {
         var target = document.querySelector(location.hash);
@@ -304,7 +381,9 @@
             source.onmessage = function (e) {
                 var entry = JSON.parse(e.data);
                 if (! entry.level) return;
-                tbody.insertBefore(buildRow(entry), tbody.firstChild);
+                var row = buildRow(entry);
+                tbody.insertBefore(row, tbody.firstChild);
+                applyDeeplinks(row);
                 searchIndex = null;
             };
             source.onerror = function () {
@@ -342,17 +421,53 @@
     }
 
     function ideLink(file, line) {
-        if (! dl.ide) return null;
-        if (dl.serverPath && dl.localPath) {
-            file = file.split(dl.serverPath).join(dl.localPath);
+        if (! deeplink.ide) return null;
+        if (serverPath && deeplink.localPath) {
+            file = file.split(serverPath).join(deeplink.localPath);
         }
-        if (dl.ide === 'vscode') {
-            return dl.wslDistro
-                ? 'vscode://vscode-remote/wsl+' + dl.wslDistro + file + ':' + line
+        if (deeplink.ide === 'vscode') {
+            return deeplink.wslDistro
+                ? 'vscode://vscode-remote/wsl+' + deeplink.wslDistro + file + ':' + line
                 : 'vscode://file/' + file + ':' + line;
         }
-        if (dl.ide === 'phpstorm') return 'phpstorm://open?file=' + encodeURIComponent(file) + '&line=' + line;
+        if (deeplink.ide === 'phpstorm') return 'phpstorm://open?file=' + encodeURIComponent(file) + '&line=' + line;
         return null;
+    }
+
+    // Wire data-file / data-line elements into clickable IDE links. Idempotent —
+    // safe to re-run after partial navigation, SSE inserts, or a settings change.
+    function applyDeeplinks(root) {
+        root = root || document;
+
+        root.querySelectorAll('.lv-loc[data-file]').forEach(function (el) {
+            var file = el.dataset.file, line = el.dataset.line;
+            var link = ideLink(file, line);
+            if (link) {
+                el.innerHTML = '<a href="' + esc(link) + '" class="link-primary text-decoration-none lv-ide-link" title="Open in IDE">'
+                    + esc(basename(file)) + ':' + esc(line) + '</a>';
+            } else {
+                el.textContent = file + ':' + line;
+            }
+        });
+
+        root.querySelectorAll('.stacktrace-line[data-file]').forEach(function (el) {
+            var link     = ideLink(el.dataset.file, el.dataset.line);
+            var existing = el.querySelector('.lv-frame-link');
+            if (link) {
+                if (existing) {
+                    existing.setAttribute('href', link);
+                } else {
+                    var a = document.createElement('a');
+                    a.href      = link;
+                    a.className = 'text-body-secondary flex-shrink-0 lv-frame-link lv-ide-link';
+                    a.title     = 'Open in IDE';
+                    a.innerHTML = '<i class="bi bi-code-slash"></i>';
+                    el.appendChild(a);
+                }
+            } else if (existing) {
+                existing.remove();
+            }
+        });
     }
 
     function parseStackFrame(frame) {
@@ -364,24 +479,23 @@
         var ctx      = entry.context || {};
         var location = ctx.location  || null;
         var req      = ctx.request   || null;
-        var link = null, locFile = null, locLine = null;
+        var locFile = null, locLine = null, colonPos = -1;
 
         if (location) {
-            var colonPos = location.lastIndexOf(':');
-            locFile = location.substring(0, colonPos);
-            locLine = location.substring(colonPos + 1);
-            link    = ideLink(locFile, locLine);
+            colonPos = location.lastIndexOf(':');
+            locFile  = location.substring(0, colonPos);
+            locLine  = location.substring(colonPos + 1);
         }
 
         // ── Inline pills: location + request ─────────────────────────────
+        // The href is wired by applyDeeplinks() once the row is in the DOM.
         var inlineHtml = '';
         if (location) {
-            inlineHtml += link
-                ? '<span class="ctx-pill"><span class="opacity-75">location=</span>'
-                    + '<span class="text-primary"><a href="' + esc(link) + '" class="link-primary text-decoration-none">'
-                    + esc(basename(locFile)) + ':' + esc(locLine) + '</a></span></span>'
-                : '<span class="ctx-pill"><span class="opacity-75">location=</span>'
-                    + '<span class="text-primary">' + esc(location) + '</span></span>';
+            var locAttr = colonPos > -1
+                ? ' data-file="' + esc(locFile) + '" data-line="' + esc(locLine) + '"'
+                : '';
+            inlineHtml += '<span class="ctx-pill"><span class="opacity-75">location=</span>'
+                + '<span class="text-primary lv-loc"' + locAttr + '>' + esc(location) + '</span></span>';
         }
         if (req) {
             var method = req.method || '';
@@ -421,12 +535,9 @@
         if (frames.length) {
             var tsum       = frames.length + ' stack frame' + (frames.length !== 1 ? 's' : '');
             var frameLines = frames.map(function (f) {
-                var fd  = parseStackFrame(f);
-                var fl  = fd ? ideLink(fd.file, fd.line) : null;
-                var btn = fl
-                    ? ' <a href="' + esc(fl) + '" class="text-body-secondary lv-frame-link flex-shrink-0" title="Open in IDE"><i class="bi bi-code-slash"></i></a>'
-                    : '';
-                return '<div class="stacktrace-line d-flex align-items-baseline gap-1"><span class="flex-grow-1">' + esc(f) + '</span>' + btn + '</div>';
+                var fd   = parseStackFrame(f);
+                var attr = fd ? ' data-file="' + esc(fd.file) + '" data-line="' + esc(fd.line) + '"' : '';
+                return '<div class="stacktrace-line d-flex align-items-baseline gap-1"' + attr + '><span class="flex-grow-1">' + esc(f) + '</span></div>';
             }).join('');
             traceHtml = '<details class="stacktrace"><summary>' + tsum + '</summary><div class="stacktrace-lines">' + frameLines + '</div></details>';
         }

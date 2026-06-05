@@ -53,6 +53,7 @@ class LogViewerService
     public function parseLogFile(string $path): array
     {
         $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+
         return $this->groupLines($lines);
     }
 
@@ -99,9 +100,11 @@ class LogViewerService
      * Examples:
      *   user.email=foo@bar.com tenant=acme
      *   request.method=POST 500
+     *
      *   user.email=.*@company\.com session.role=admin
      *
-     * @param  list<string>  $levels
+     * @param list<string> $levels
+     *
      * @return list<array>
      */
     public function filterEntries(array $entries, array $levels, string $query): array
@@ -109,7 +112,7 @@ class LogViewerService
         if ($levels !== []) {
             $entries = array_values(array_filter(
                 $entries,
-                fn ($e) => in_array($e['level'], $levels, true),
+                static fn ($e) => in_array($e['level'], $levels, true),
             ));
         }
 
@@ -197,7 +200,7 @@ class LogViewerService
         $result = @preg_match('/' . $term . '/i', $haystack);
 
         return $result === false
-            ? stripos($haystack, $term) !== false
+            ? str_contains(strtolower($haystack), strtolower($term))
             : (bool) $result;
     }
 
@@ -207,7 +210,8 @@ class LogViewerService
      * Each entry gets an `occurrence` (Nth time this message appears) and `total`
      * (how many times it appears across the whole file).
      *
-     * @param  list<string>                                                                                                                           $rawLines
+     * @param list<string> $rawLines
+     *
      * @return list<array{level:string,datetime:string,message:string,context:array<string,mixed>,stacktrace:list<string>,occurrence:int,total:int}>
      */
     public function groupLines(array $rawLines): array
@@ -243,20 +247,23 @@ class LogViewerService
      * Counts how many times each unique message appears across the entry list,
      * then assigns each entry its occurrence index and the total count.
      *
-     * @param  list<array>  $entries
+     * @param list<array> $entries
+     *
      * @return list<array>
      */
     private function assignOccurrences(array $entries): array
     {
         $totals = [];
+
         foreach ($entries as $entry) {
             $totals[$entry['message']] = ($totals[$entry['message']] ?? 0) + 1;
         }
 
         $seen = [];
+
         foreach ($entries as &$entry) {
-            $msg                = $entry['message'];
-            $seen[$msg]         = ($seen[$msg] ?? 0) + 1;
+            $msg                 = $entry['message'];
+            $seen[$msg]          = ($seen[$msg] ?? 0) + 1;
             $entry['occurrence'] = $seen[$msg];
             $entry['total']      = $totals[$msg];
         }
@@ -375,7 +382,8 @@ class LogViewerService
         while ($i < $len) {
             if ($str[$i] === '\\' && $i + 1 < $len) {
                 $val .= $str[$i] . $str[$i + 1];
-                $i   += 2;
+                $i += 2;
+
                 continue;
             }
 
@@ -403,7 +411,8 @@ class LogViewerService
             if ($inStr) {
                 if ($ch === '\\' && $i + 1 < $len) {
                     $val .= $ch . $str[$i + 1];
-                    $i   += 2;
+                    $i += 2;
+
                     continue;
                 }
 

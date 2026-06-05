@@ -4,10 +4,17 @@ declare(strict_types=1);
 
 namespace Brunoggdev\LoggingExtended\Tests;
 
+use Brunoggdev\LoggingExtended\LogAlert;
 use Brunoggdev\LoggingExtended\Logger;
+use Brunoggdev\LoggingExtended\Tests\Fixtures\ChildFactoryException;
+use Brunoggdev\LoggingExtended\Tests\Fixtures\FactoryException;
+use Closure;
+use CodeIgniter\I18n\Time;
 use CodeIgniter\Log\Handlers\FileHandler;
 use CodeIgniter\Test\CIUnitTestCase;
+use ReflectionProperty;
 use RuntimeException;
+use Throwable;
 
 /**
  * @internal
@@ -57,7 +64,7 @@ final class LoggerTest extends CIUnitTestCase
         }
 
         // Reset the static cache instance so the next test starts fresh.
-        $ref = new \ReflectionProperty(\Brunoggdev\LoggingExtended\Logger::class, 'alertCache');
+        $ref = new ReflectionProperty(Logger::class, 'alertCache');
         $ref->setValue(null, null);
     }
 
@@ -202,9 +209,9 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionWithUserCallableLogsUserData(): void
     {
-        $config                              = config('LoggingExtended');
-        $config->exception['captures']['user'] = fn () => ['id' => 42, 'email' => 'user@example.com'];
-        $config->exception['trace']          = false;
+        $config                                = config('LoggingExtended');
+        $config->exception['captures']['user'] = static fn () => ['id' => 42, 'email' => 'user@example.com'];
+        $config->exception['trace']            = false;
 
         $e = new RuntimeException('With user');
         $this->logger->exception($e);
@@ -216,9 +223,9 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionUserCallableReturningNullOmitsUserKey(): void
     {
-        $config                              = config('LoggingExtended');
-        $config->exception['captures']['user'] = fn () => null;
-        $config->exception['trace']          = false;
+        $config                                = config('LoggingExtended');
+        $config->exception['captures']['user'] = static fn () => null;
+        $config->exception['trace']            = false;
 
         $e = new RuntimeException('No user');
         $this->logger->exception($e);
@@ -229,11 +236,11 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionWithContextArrayResolvesEachKey(): void
     {
-        $config                               = config('LoggingExtended');
-        $config->exception['trace']           = false;
+        $config                                 = config('LoggingExtended');
+        $config->exception['trace']             = false;
         $config->exception['captures']['extra'] = [
-            'tenant' => fn () => 'acme',
-            'region' => fn () => 'us-east-1',
+            'tenant' => static fn () => 'acme',
+            'region' => static fn () => 'us-east-1',
         ];
 
         $e = new RuntimeException('With context');
@@ -246,10 +253,10 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionContextResolverReturningNullOmitsKey(): void
     {
-        $config                               = config('LoggingExtended');
-        $config->exception['trace']           = false;
+        $config                                 = config('LoggingExtended');
+        $config->exception['trace']             = false;
         $config->exception['captures']['extra'] = [
-            'nullable' => fn () => null,
+            'nullable' => static fn () => null,
         ];
 
         $e = new RuntimeException('Null context');
@@ -285,8 +292,8 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testExceptionWithSessionTrueDoesNotCrash(): void
     {
-        $config                       = config('LoggingExtended');
-        $config->exception['trace']   = false;
+        $config                                   = config('LoggingExtended');
+        $config->exception['trace']               = false;
         $config->exception['captures']['session'] = true;
 
         $e = new RuntimeException('Session test');
@@ -295,7 +302,7 @@ final class LoggerTest extends CIUnitTestCase
         try {
             $this->logger->exception($e);
             $this->assertStringContainsString('[RuntimeException]', $this->lastLogLine());
-        } catch (\Throwable $thrown) {
+        } catch (Throwable $thrown) {
             // If session truly unavailable, a specific SessionException is acceptable;
             // any other unexpected exception should re-fail the test.
             $this->assertStringContainsString('Session', $thrown::class);
@@ -306,7 +313,7 @@ final class LoggerTest extends CIUnitTestCase
     {
         // redactParams() is private; access it via Closure binding against the
         // already-constructed logger instance so we reuse the setUp config.
-        $redact = \Closure::bind(
+        $redact = Closure::bind(
             fn (array $params, array $keys) => $this->redactParams($params, $keys),
             $this->logger,
             Logger::class,
@@ -324,7 +331,7 @@ final class LoggerTest extends CIUnitTestCase
 
     public function testRedactParamsIsCaseInsensitive(): void
     {
-        $redact = \Closure::bind(
+        $redact = Closure::bind(
             fn (array $params, array $keys) => $this->redactParams($params, $keys),
             $this->logger,
             Logger::class,
@@ -347,9 +354,9 @@ final class LoggerTest extends CIUnitTestCase
     {
         $called = false;
 
-        $config                              = config('LoggingExtended');
+        $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = ['error'];
-        $config->exception['alerts']['handlers'] = [function (\Brunoggdev\LoggingExtended\LogAlert $alert) use (&$called) {
+        $config->exception['alerts']['handlers'] = [static function (LogAlert $alert) use (&$called) {
             $called = true;
         }];
 
@@ -364,20 +371,20 @@ final class LoggerTest extends CIUnitTestCase
 
         $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = ['error'];
-        $config->exception['alerts']['handlers'] = [function (\Brunoggdev\LoggingExtended\LogAlert $alert) use (&$received) {
+        $config->exception['alerts']['handlers'] = [static function (LogAlert $alert) use (&$received) {
             $received = $alert;
         }];
 
         $this->logger->error('My alert message', ['key' => 'value']);
 
-        $this->assertInstanceOf(\Brunoggdev\LoggingExtended\LogAlert::class, $received);
+        $this->assertInstanceOf(LogAlert::class, $received);
         $this->assertSame('error', $received->level);
         $this->assertSame('My alert message', $received->message);
         $this->assertSame([], $received->captures);
         $this->assertSame(['key' => 'value'], $received->context);
         $this->assertNull($received->exception);
         $this->assertNull($received->location);
-        $this->assertInstanceOf(\CodeIgniter\I18n\Time::class, $received->timestamp);
+        $this->assertInstanceOf(Time::class, $received->timestamp);
     }
 
     public function testExceptionAlertCarriesExceptionAndLocation(): void
@@ -387,11 +394,11 @@ final class LoggerTest extends CIUnitTestCase
         $config                                  = config('LoggingExtended');
         $config->exception['trace']              = false;
         $config->exception['alerts']['levels']   = ['error'];
-        $config->exception['alerts']['handlers'] = [function (\Brunoggdev\LoggingExtended\LogAlert $alert) use (&$received) {
+        $config->exception['alerts']['handlers'] = [static function (LogAlert $alert) use (&$received) {
             $received = $alert;
         }];
 
-        $e = new \RuntimeException('Alert exception');
+        $e = new RuntimeException('Alert exception');
         $this->logger->exception($e);
 
         $this->assertSame('Alert exception', $received->message);
@@ -406,15 +413,15 @@ final class LoggerTest extends CIUnitTestCase
     {
         $received = null;
 
-        $config                                      = config('LoggingExtended');
-        $config->exception['trace']                  = false;
-        $config->exception['captures']['user']       = fn () => ['id' => 42];
-        $config->exception['alerts']['levels']       = ['error'];
-        $config->exception['alerts']['handlers']     = [function (\Brunoggdev\LoggingExtended\LogAlert $alert) use (&$received) {
+        $config                                  = config('LoggingExtended');
+        $config->exception['trace']              = false;
+        $config->exception['captures']['user']   = static fn () => ['id' => 42];
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['handlers'] = [static function (LogAlert $alert) use (&$received) {
             $received = $alert;
         }];
 
-        $this->logger->exception(new \RuntimeException('With user'));
+        $this->logger->exception(new RuntimeException('With user'));
 
         $this->assertSame(['id' => 42], $received->captures['user']);
         $this->assertArrayNotHasKey('user', $received->context);
@@ -424,9 +431,9 @@ final class LoggerTest extends CIUnitTestCase
     {
         $called = false;
 
-        $config                              = config('LoggingExtended');
+        $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = ['critical'];
-        $config->exception['alerts']['handlers'] = [function () use (&$called) {
+        $config->exception['alerts']['handlers'] = [static function () use (&$called) {
             $called = true;
         }];
 
@@ -439,9 +446,9 @@ final class LoggerTest extends CIUnitTestCase
     {
         $called = false;
 
-        $config                              = config('LoggingExtended');
+        $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = [];
-        $config->exception['alerts']['handlers'] = [function () use (&$called) {
+        $config->exception['alerts']['handlers'] = [static function () use (&$called) {
             $called = true;
         }];
 
@@ -453,7 +460,7 @@ final class LoggerTest extends CIUnitTestCase
     public function testAlertHandlerNotCalledWhenHandlersEmpty(): void
     {
         // Should not throw even with a matching level and no handlers
-        $config                              = config('LoggingExtended');
+        $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = ['error'];
         $config->exception['alerts']['handlers'] = [];
 
@@ -465,11 +472,11 @@ final class LoggerTest extends CIUnitTestCase
     {
         $secondCalled = false;
 
-        $config                              = config('LoggingExtended');
+        $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = ['error'];
         $config->exception['alerts']['handlers'] = [
-            function () { throw new \RuntimeException('Handler exploded'); },
-            function () use (&$secondCalled) { $secondCalled = true; },
+            static function () { throw new RuntimeException('Handler exploded'); },
+            static function () use (&$secondCalled) { $secondCalled = true; },
         ];
 
         $this->logger->error('Broken handler test');
@@ -483,15 +490,17 @@ final class LoggerTest extends CIUnitTestCase
         $called = false;
 
         $handler = new class ($called) {
-            public function __construct(private bool &$ref) {}
+            public function __construct(private bool &$ref)
+            {
+            }
 
-            public function __invoke(\Brunoggdev\LoggingExtended\LogAlert $alert): void
+            public function __invoke(LogAlert $alert): void
             {
                 $this->ref = true;
             }
         };
 
-        $config                              = config('LoggingExtended');
+        $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = ['error'];
         $config->exception['alerts']['handlers'] = [$handler];
 
@@ -504,12 +513,12 @@ final class LoggerTest extends CIUnitTestCase
     {
         $count = 0;
 
-        $config                              = config('LoggingExtended');
+        $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = ['error'];
         $config->exception['alerts']['handlers'] = [
-            function () use (&$count) { $count++; },
-            function () use (&$count) { $count++; },
-            function () use (&$count) { $count++; },
+            static function () use (&$count) { $count++; },
+            static function () use (&$count) { $count++; },
+            static function () use (&$count) { $count++; },
         ];
 
         $this->logger->error('Multiple handlers');
@@ -525,10 +534,10 @@ final class LoggerTest extends CIUnitTestCase
     {
         $count = 0;
 
-        $config                               = config('LoggingExtended');
-        $config->exception['alerts']['levels']    = ['error'];
-        $config->exception['alerts']['throttle']  = 15;
-        $config->exception['alerts']['handlers']  = [function () use (&$count) { $count++; }];
+        $config                                  = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['throttle'] = 15;
+        $config->exception['alerts']['handlers'] = [static function () use (&$count) { $count++; }];
 
         $this->logger->error('Throttle test message');
         $this->logger->error('Throttle test message'); // should be suppressed
@@ -541,10 +550,10 @@ final class LoggerTest extends CIUnitTestCase
     {
         $count = 0;
 
-        $config                               = config('LoggingExtended');
-        $config->exception['alerts']['levels']    = ['error'];
-        $config->exception['alerts']['throttle']  = 15;
-        $config->exception['alerts']['handlers']  = [function () use (&$count) { $count++; }];
+        $config                                  = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['throttle'] = 15;
+        $config->exception['alerts']['handlers'] = [static function () use (&$count) { $count++; }];
 
         $this->logger->error('First unique message');
         $this->logger->error('Second unique message');
@@ -556,10 +565,10 @@ final class LoggerTest extends CIUnitTestCase
     {
         $count = 0;
 
-        $config                               = config('LoggingExtended');
-        $config->exception['alerts']['levels']    = ['error'];
-        $config->exception['alerts']['throttle']  = 0;
-        $config->exception['alerts']['handlers']  = [function () use (&$count) { $count++; }];
+        $config                                  = config('LoggingExtended');
+        $config->exception['alerts']['levels']   = ['error'];
+        $config->exception['alerts']['throttle'] = 0;
+        $config->exception['alerts']['handlers'] = [static function () use (&$count) { $count++; }];
 
         $this->logger->error('Same message');
         $this->logger->error('Same message');
@@ -571,10 +580,10 @@ final class LoggerTest extends CIUnitTestCase
     {
         $count = 0;
 
-        $config                              = config('LoggingExtended');
+        $config                                  = config('LoggingExtended');
         $config->exception['alerts']['levels']   = ['error'];
         $config->exception['alerts']['throttle'] = 15;
-        $config->exception['alerts']['handlers'] = [function () use (&$count) {
+        $config->exception['alerts']['handlers'] = [static function () use (&$count) {
             $count++;
 
             return false; // signal: did not deliver, do not throttle
@@ -592,7 +601,7 @@ final class LoggerTest extends CIUnitTestCase
         $config                     = config('LoggingExtended');
         $config->exception['trace'] = false;
 
-        $e = new \RuntimeException('Direct throw');
+        $e = new RuntimeException('Direct throw');
         $this->logger->exception($e);
 
         // Location should point to this test file — where the exception was created.
@@ -606,7 +615,7 @@ final class LoggerTest extends CIUnitTestCase
 
         // FactoryException::make() creates the exception inside its own class file.
         // The resolved location should point back here (the caller), not into FactoryException.php.
-        $e = \Brunoggdev\LoggingExtended\Tests\Fixtures\FactoryException::make('Named constructor exception');
+        $e = FactoryException::make('Named constructor exception');
         $this->logger->exception($e);
 
         $line = $this->mainLogLine();
@@ -622,7 +631,7 @@ final class LoggerTest extends CIUnitTestCase
         // ChildFactoryException inherits make() from FactoryException.
         // PHP's trace records the frame class as FactoryException (declaring class),
         // not ChildFactoryException — so === $e::class would miss it.
-        $e = \Brunoggdev\LoggingExtended\Tests\Fixtures\ChildFactoryException::make('Inherited named constructor');
+        $e = ChildFactoryException::make('Inherited named constructor');
         $this->logger->exception($e);
 
         $line = $this->mainLogLine();
