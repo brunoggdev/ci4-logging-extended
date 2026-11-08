@@ -327,16 +327,46 @@
         }
     }
 
-    // ── Share button (event delegation) ──────────────────────────────────
-    document.addEventListener('click', function (e) {
-        var btn = e.target.closest('.lv-share');
-        if (! btn) return;
-        var url  = location.origin + location.pathname + location.search + '#' + btn.dataset.anchor;
-        var icon = btn.querySelector('.bi');
-        navigator.clipboard.writeText(url).then(function () {
-            icon.className = 'bi bi-check2 fs-6';
-            setTimeout(function () { icon.className = 'bi bi-link-45deg fs-6'; }, 1500);
+    // ── Row actions: share link + copy entry as JSON (event delegation) ──
+    // navigator.clipboard only exists in secure contexts (HTTPS / localhost), so
+    // fall back to a hidden textarea for viewers served over plain HTTP.
+    function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text);
+        }
+        return new Promise(function (resolve, reject) {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity  = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            var ok = document.execCommand('copy');
+            ta.remove();
+            ok ? resolve() : reject(new Error('Copy failed'));
         });
+    }
+
+    function flashIcon(btn, idleClass) {
+        var icon = btn.querySelector('.bi');
+        icon.className = 'bi bi-check2 fs-6';
+        setTimeout(function () { icon.className = 'bi ' + idleClass + ' fs-6'; }, 1500);
+    }
+
+    document.addEventListener('click', function (e) {
+        var share = e.target.closest('.lv-share');
+        if (share) {
+            var url = location.origin + location.pathname + location.search + '#' + share.dataset.anchor;
+            copyText(url).then(function () { flashIcon(share, 'bi-link-45deg'); });
+            return;
+        }
+
+        var copy = e.target.closest('.lv-copy');
+        if (copy) {
+            var row = copy.closest('.lv-row');
+            var json = JSON.stringify(JSON.parse(row.dataset.entry), null, 2);
+            copyText(json).then(function () { flashIcon(copy, 'bi-clipboard'); });
+        }
     });
 
     // ── Wire deep links for the server-rendered rows ──────────────────────
@@ -402,18 +432,23 @@
         notice:    'bi-info-square-fill', info: 'bi-info-circle-fill',
     };
 
-    function levelBadge(level) {
-        if (['emergency','alert','critical','error'].indexOf(level) !== -1) return 'text-bg-danger';
-        if (level === 'warning') return 'text-bg-warning';
-        if (level === 'notice' || level === 'info') return 'text-bg-info';
-        return 'text-bg-secondary';
+    function levelColor(level) {
+        if (['emergency','alert','critical','error'].indexOf(level) !== -1) return 'danger';
+        if (level === 'warning') return 'warning';
+        if (level === 'notice' || level === 'info') return 'info';
+        return 'secondary';
     }
 
-    function levelTextClass(level) {
-        if (['emergency','alert','critical','error'].indexOf(level) !== -1) return 'text-danger';
-        if (level === 'warning') return 'text-warning';
-        if (level === 'notice' || level === 'info') return 'text-info';
-        return 'text-secondary';
+    // Mirrors lvEntryPayload() in log_viewer.php.
+    function entryPayload(entry) {
+        return {
+            file:       cfg.filename,
+            level:      entry.level,
+            datetime:   entry.datetime,
+            message:    entry.message,
+            context:    entry.context || {},
+            stacktrace: entry.stacktrace || [],
+        };
     }
 
     function levelIcon(level) {
@@ -545,16 +580,19 @@
         var tr           = document.createElement('tr');
         tr.className     = 'lv-row';
         tr.dataset.level = entry.level;
+        tr.dataset.entry = JSON.stringify(entryPayload(entry));
         tr.style.animation = 'lv-fadeIn .3s ease';
         tr.innerHTML =
-            '<td class="' + levelTextClass(entry.level) + ' text-center ps-3 pe-0"><i class="bi ' + levelIcon(entry.level) + '"></i></td>' +
-            '<td class="text-center"><span class="badge ' + levelBadge(entry.level) + '">' + esc(entry.level) + '</span></td>' +
+            '<td class="text-' + levelColor(entry.level) + ' text-center ps-3 pe-0"><i class="bi ' + levelIcon(entry.level) + '"></i></td>' +
+            '<td class="text-center"><span class="badge text-bg-' + levelColor(entry.level) + '">' + esc(entry.level) + '</span></td>' +
             '<td class="font-monospace text-nowrap small">' + esc(entry.datetime) + '</td>' +
             '<td><div class="d-flex align-items-start gap-2"><div class="font-monospace text-break lv-msg flex-grow-1">' + esc(entry.message) + '</div></div>' +
             (inlineHtml ? '<div class="d-flex flex-wrap gap-1 mt-1">' + inlineHtml + '</div>' : '') +
             detailsHtml +
             traceHtml + '</td>' +
-            '<td class="lv-row-actions"><div class="d-flex gap-1 justify-content-end pe-2"></div></td>';
+            '<td class="lv-row-actions"><div class="d-flex gap-1 justify-content-end pe-2">'
+            + '<button class="btn btn-sm btn-link p-0 text-body-secondary lv-copy" title="Copy entry as JSON"><i class="bi bi-clipboard fs-6"></i></button>'
+            + '</div></td>';
         return tr;
     }
 

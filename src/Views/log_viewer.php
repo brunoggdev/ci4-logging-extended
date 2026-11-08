@@ -34,18 +34,6 @@ if (! function_exists('parseStackFrame')) {
     }
 }
 
-if (! function_exists('levelBadgeClass')) {
-    function levelBadgeClass(string $level): string
-    {
-        return match (true) {
-            in_array($level, ['emergency', 'alert', 'critical', 'error'], true) => 'text-bg-danger',
-            $level === 'warning'                                                => 'text-bg-warning',
-            in_array($level, ['notice', 'info'], true)                          => 'text-bg-info',
-            default                                                             => 'text-bg-secondary',
-        };
-    }
-}
-
 if (! function_exists('levelColor')) {
     function levelColor(string $level): string
     {
@@ -54,18 +42,6 @@ if (! function_exists('levelColor')) {
             $level === 'warning'                                                => 'warning',
             in_array($level, ['notice', 'info'], true)                          => 'info',
             default                                                             => 'secondary',
-        };
-    }
-}
-
-if (! function_exists('levelTextClass')) {
-    function levelTextClass(string $level): string
-    {
-        return match (true) {
-            in_array($level, ['emergency', 'alert', 'critical', 'error'], true) => 'text-danger',
-            $level === 'warning'                                                => 'text-warning',
-            in_array($level, ['notice', 'info'], true)                          => 'text-info',
-            default                                                             => 'text-secondary',
         };
     }
 }
@@ -82,6 +58,24 @@ if (! function_exists('levelIcon')) {
             $level === 'info'                              => 'bi-info-circle-fill',
             default                                        => 'bi-bug-fill',
         };
+    }
+}
+
+if (! function_exists('lvEntryPayload')) {
+    /**
+     * The structured form of an entry used by the "copy as JSON" button. Kept
+     * in sync with entryPayload() in log_viewer_foot.php (live-tailed rows).
+     */
+    function lvEntryPayload(array $entry, string $file): array
+    {
+        return [
+            'file'       => $file,
+            'level'      => $entry['level'],
+            'datetime'   => $entry['datetime'],
+            'message'    => $entry['message'],
+            'context'    => (object) $entry['context'],
+            'stacktrace' => $entry['stacktrace'],
+        ];
     }
 }
 
@@ -226,6 +220,10 @@ include __DIR__ . '/log_viewer_head.php';
                             <span class="dot" id="live-dot"></span> Live
                         </button>
                     <?php endif ?>
+                    <a href="<?= site_url($basePath . '/' . $filename . '/download') ?>"
+                       class="btn btn-sm btn-outline-secondary" title="Download file">
+                        <i class="bi bi-download"></i>
+                    </a>
                     <form method="POST"
                           action="<?= site_url($basePath . '/' . $filename . '/delete') ?>"
                           class="lv-delete-form"
@@ -288,12 +286,13 @@ include __DIR__ . '/log_viewer_head.php';
                                     $locLine = substr($location, $colonPos + 1);
                                 }
                                 ?>
-                                <tr class="lv-row" id="<?= $rowId ?>" data-level="<?= esc($entry['level']) ?>">
-                                    <td class="<?= levelTextClass($entry['level']) ?> text-center ps-3 pe-0">
+                                <tr class="lv-row" id="<?= $rowId ?>" data-level="<?= esc($entry['level']) ?>"
+                                    data-entry="<?= esc(json_encode(lvEntryPayload($entry, $filename), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?>">
+                                    <td class="text-<?= levelColor($entry['level']) ?> text-center ps-3 pe-0">
                                         <i class="bi <?= levelIcon($entry['level']) ?>"></i>
                                     </td>
                                     <td class="text-center">
-                                        <span class="badge <?= levelBadgeClass($entry['level']) ?>">
+                                        <span class="badge text-bg-<?= levelColor($entry['level']) ?>">
                                             <?= esc($entry['level']) ?>
                                         </span>
                                     </td>
@@ -377,6 +376,9 @@ include __DIR__ . '/log_viewer_head.php';
                                     </td>
                                     <td class="lv-row-actions">
                                         <div class="d-flex gap-1 justify-content-end pe-2">
+                                            <button class="btn btn-sm btn-link p-0 text-body-secondary lv-copy" title="Copy entry as JSON">
+                                                <i class="bi bi-clipboard fs-6"></i>
+                                            </button>
                                             <button class="btn btn-sm btn-link p-0 text-body-secondary lv-share"
                                                     data-anchor="<?= $rowId ?>" title="Copy link to entry">
                                                 <i class="bi bi-link-45deg fs-6"></i>
@@ -527,6 +529,7 @@ include __DIR__ . '/log_viewer_head.php';
 <script>
 window.LV_CONFIG = <?= json_encode([
     'streamUrl' => $isToday ? site_url($basePath . '/stream') : null,
+    'filename'  => $filename,
     'deeplink'  => [
         // serverPath: explicit config override, else auto-detected from the
         // running app's root. This is the only deeplink value the server knows;

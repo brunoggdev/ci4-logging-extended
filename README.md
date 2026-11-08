@@ -218,7 +218,8 @@ A web UI for browsing your daily log files, with multiple themes to choose from 
 - **Search** — full-text, dot-notation context lookup, and regex (see [Filtering and search](#filtering-and-search))
 - **Shareable links** — search query, level filter, file, and page are all reflected in the URL
 - **Live tail** — new entries stream in automatically while viewing today's file (via SSE)
-- **File management** — delete individual files or bulk-select and delete multiple at once
+- **Copy as JSON** — copy any entry (message, context, stack trace) as structured JSON, handy for pasting into an AI agent or issue
+- **File management** — download or delete individual files, or bulk-select and delete multiple at once
 - **IDE deep links** — click any stack frame to jump straight to that file and line in your editor
 - **Occurrence tracking** — repeated messages show `2/5` to surface noise without losing context
 

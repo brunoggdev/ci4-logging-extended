@@ -24,6 +24,7 @@ $routes->group($path, $groupOptions, static function ($routes) {
     $routes->post('login', 'LogViewerController::login');
     $routes->get('stream', 'LogViewerController::stream');
     $routes->get('(:segment)', 'LogViewerController::show/$1');
+    $routes->get('(:segment)/download', 'LogViewerController::download/$1');
     $routes->post('(:segment)/delete', 'LogViewerController::delete/$1');
     $routes->post('delete-multiple', 'LogViewerController::deleteMultiple');
 });

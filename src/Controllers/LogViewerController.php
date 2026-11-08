@@ -56,11 +56,7 @@ class LogViewerController extends Controller
     public function show(string $filename)
     {
         $filename = $this->service->sanitizeFilename($filename);
-        $path     = $this->logDir . $filename;
-
-        if (! file_exists($path)) {
-            throw new PageNotFoundException('Log file not found.');
-        }
+        $path     = $this->resolveExistingPath($filename);
 
         $allEntries     = array_reverse($this->service->getEntries($path));
         $allLevelCounts = array_count_values(array_column($allEntries, 'level'));
@@ -94,9 +90,14 @@ class LogViewerController extends Controller
         ]);
     }
 
+    public function download(string $filename)
+    {
+        return $this->response->download($this->resolveExistingPath($filename), null);
+    }
+
     public function login()
     {
-        $basePath = trim($this->config->viewer['routes']['path'], '/');
+        $basePath = $this->basePath();
 
         if ($this->request->is('post')) {
             $password = $this->request->getPost('password') ?? '';
@@ -104,9 +105,8 @@ class LogViewerController extends Controller
 
             if ($hash !== '' && password_verify($password, $hash)) {
                 $this->setLoginCookie();
-                $redirect = $this->request->getPost('redirect') ?: site_url($basePath);
 
-                return redirect()->to($redirect)->withCookies();
+                return redirect()->to($this->safeRedirect($this->request->getPost('redirect') ?? '', $basePath))->withCookies();
             }
 
             return view('\Brunoggdev\LoggingExtended\Views\log_viewer_login', [
@@ -131,9 +131,8 @@ class LogViewerController extends Controller
         $cookie = $_COOKIE['lv_auth'] ?? '';
 
         if (! $this->isValidLoginCookie($cookie)) {
-            $basePath = trim($this->config->viewer['routes']['path'], '/');
             $redirect = urlencode(current_url());
-            header('Location: ' . site_url($basePath . '/login') . '?redirect=' . $redirect);
+            header('Location: ' . site_url($this->basePath() . '/login') . '?redirect=' . $redirect);
 
             exit;
         }
@@ -182,35 +181,64 @@ class LogViewerController extends Controller
 
     public function delete(string $filename)
     {
-        $filename = $this->service->sanitizeFilename($filename);
-        $path     = $this->logDir . $filename;
+        $this->deleteFile($filename);
 
-        if (file_exists($path)) {
-            unlink($path);
-            $this->service->clearCache($path);
-        }
-
-        return redirect()->to(site_url(trim($this->config->viewer['routes']['path'], '/')));
+        return redirect()->to(site_url($this->basePath()));
     }
 
     public function deleteMultiple()
     {
-        $filenames = (array) ($this->request->getPost('filenames') ?? []);
-
-        foreach ($filenames as $filename) {
+        foreach ((array) ($this->request->getPost('filenames') ?? []) as $filename) {
             try {
-                $filename = $this->service->sanitizeFilename((string) $filename);
-                $path     = $this->logDir . $filename;
-                if (file_exists($path)) {
-                    unlink($path);
-                    $this->service->clearCache($path);
-                }
+                $this->deleteFile((string) $filename);
             } catch (Throwable) {
                 // Skip invalid or non-existent filenames silently
             }
         }
 
-        return redirect()->to(site_url(trim($this->config->viewer['routes']['path'], '/')));
+        return redirect()->to(site_url($this->basePath()));
+    }
+
+    private function basePath(): string
+    {
+        return trim($this->config->viewer['routes']['path'], '/');
+    }
+
+    /**
+     * Sanitizes the filename and returns its absolute path.
+     *
+     * @throws PageNotFoundException When the name is invalid or the file doesn't exist
+     */
+    private function resolveExistingPath(string $filename): string
+    {
+        $path = $this->logDir . $this->service->sanitizeFilename($filename);
+
+        if (! file_exists($path)) {
+            throw new PageNotFoundException('Log file not found.');
+        }
+
+        return $path;
+    }
+
+    private function deleteFile(string $filename): void
+    {
+        $path = $this->logDir . $this->service->sanitizeFilename($filename);
+
+        if (file_exists($path)) {
+            unlink($path);
+            $this->service->clearCache($path);
+        }
+    }
+
+    /**
+     * Only allows post-login redirects back into the viewer, preventing an
+     * open redirect via a crafted ?redirect= link.
+     */
+    private function safeRedirect(string $redirect, string $basePath): string
+    {
+        $fallback = site_url($basePath);
+
+        return $redirect !== '' && str_starts_with($redirect, $fallback) ? $redirect : $fallback;
     }
 
     public function stream(): void
