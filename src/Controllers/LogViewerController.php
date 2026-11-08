@@ -46,6 +46,8 @@ class LogViewerController extends Controller
             'levelCounts'  => [],
             'activeLevels' => [],
             'searchQuery'  => '',
+            'timeFrom'     => '',
+            'timeTo'       => '',
             'page'         => 1,
             'totalPages'   => 1,
             'total'        => 0,
@@ -66,9 +68,11 @@ class LogViewerController extends Controller
             static fn ($l) => $l !== '',
         ));
         $query   = trim($this->request->getGet('q') ?? '');
+        $from    = $this->service->normalizeTime($this->request->getGet('from') ?? '') ?? '';
+        $to      = $this->service->normalizeTime($this->request->getGet('to') ?? '') ?? '';
         $perPage = $this->config->viewer['perPage'];
 
-        $filtered   = $this->service->filterEntries($allEntries, $activeLevels, $query);
+        $filtered   = $this->service->filterEntries($allEntries, $activeLevels, $query, $from, $to);
         $total      = count($filtered);
         $totalPages = max(1, (int) ceil($total / $perPage));
         $page       = min(max(1, (int) ($this->request->getGet('page') ?? 1)), $totalPages);
@@ -82,6 +86,8 @@ class LogViewerController extends Controller
             'levelCounts'  => $allLevelCounts,
             'activeLevels' => $activeLevels,
             'searchQuery'  => $query,
+            'timeFrom'     => $from,
+            'timeTo'       => $to,
             'page'         => $page,
             'totalPages'   => $totalPages,
             'total'        => $total,

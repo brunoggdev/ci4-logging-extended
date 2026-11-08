@@ -236,6 +236,31 @@ final class LogViewerServiceTest extends CIUnitTestCase
         $this->assertCount(3, $filtered);
     }
 
+    public function testFilterEntriesTimeRangeIsInclusiveToTheMinute(): void
+    {
+        $filtered = $this->service->filterEntries($this->makeEntries(), [], '', '10:01', '10:02');
+
+        $this->assertSame(['User logged in', 'Slow query detected'], array_column($filtered, 'message'));
+    }
+
+    public function testFilterEntriesOpenEndedTimeRange(): void
+    {
+        $this->assertCount(2, $this->service->filterEntries($this->makeEntries(), [], '', '10:01'));
+        $this->assertCount(1, $this->service->filterEntries($this->makeEntries(), [], '', '', '10:00'));
+    }
+
+    public function testFilterEntriesMalformedTimeIsIgnored(): void
+    {
+        $this->assertCount(3, $this->service->filterEntries($this->makeEntries(), [], '', '25:00', 'abc'));
+    }
+
+    public function testFilterEntriesTimeRangeCombinesWithLevelAndQuery(): void
+    {
+        $filtered = $this->service->filterEntries($this->makeEntries(), ['info', 'warning'], 'query', '10:00', '10:02');
+
+        $this->assertSame(['Slow query detected'], array_column($filtered, 'message'));
+    }
+
     public function testFilterEntriesSpecificLevelReturnsOnlyMatchingEntries(): void
     {
         $entries  = $this->makeEntries();

@@ -9,6 +9,8 @@ use Brunoggdev\LoggingExtended\Config\LoggingExtended;
  * @var array<string,int>                                                                                                            $levelCounts
  * @var list<string>                                                                                                                 $activeLevels
  * @var string                                                                                                                       $searchQuery
+ * @var string                                                                                                                       $timeFrom
+ * @var string                                                                                                                       $timeTo
  * @var int                                                                                                                          $page
  * @var int                                                                                                                          $totalPages
  * @var int                                                                                                                          $total
@@ -80,12 +82,17 @@ if (! function_exists('lvEntryPayload')) {
 }
 
 if (! function_exists('lvUrl')) {
-    function lvUrl(string $basePath, string $filename, int $page, array $levels, string $query): string
+    /**
+     * @param array{levels:list<string>,q:string,from:string,to:string} $filters
+     */
+    function lvUrl(string $basePath, string $filename, int $page, array $filters): string
     {
         $params = array_filter([
             'page'   => $page > 1 ? $page : null,
-            'levels' => $levels !== [] ? implode(',', $levels) : null,
-            'q'      => $query !== '' ? $query : null,
+            'levels' => $filters['levels'] !== [] ? implode(',', $filters['levels']) : null,
+            'q'      => $filters['q'] !== '' ? $filters['q'] : null,
+            'from'   => $filters['from'] !== '' ? $filters['from'] : null,
+            'to'     => $filters['to'] !== '' ? $filters['to'] : null,
         ], static fn ($v) => $v !== null);
 
         return site_url($basePath . '/' . $filename) . ($params ? '?' . http_build_query($params) : '');
@@ -93,17 +100,22 @@ if (! function_exists('lvUrl')) {
 }
 
 if (! function_exists('lvToggleLevelUrl')) {
-    function lvToggleLevelUrl(string $basePath, string $filename, string $level, array $activeLevels, string $query): string
+    /**
+     * @param array{levels:list<string>,q:string,from:string,to:string} $filters
+     */
+    function lvToggleLevelUrl(string $basePath, string $filename, string $level, array $filters): string
     {
+        $active = $filters['levels'];
+
         if ($level === 'all') {
             $new = [];
-        } elseif (in_array($level, $activeLevels, true)) {
-            $new = array_values(array_filter($activeLevels, static fn ($l) => $l !== $level));
+        } elseif (in_array($level, $active, true)) {
+            $new = array_values(array_filter($active, static fn ($l) => $l !== $level));
         } else {
-            $new = [...$activeLevels, $level];
+            $new = [...$active, $level];
         }
 
-        return lvUrl($basePath, $filename, 1, $new, $query);
+        return lvUrl($basePath, $filename, 1, ['levels' => $new] + $filters);
     }
 }
 
@@ -112,6 +124,8 @@ $deeplink      = $viewerConfig->viewer['deeplink'];
 $levelOrder    = ['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'];
 $presentLevels = array_values(array_intersect($levelOrder, array_keys($levelCounts)));
 $allActive     = $activeLevels === [];
+$filters       = ['levels' => $activeLevels, 'q' => $searchQuery, 'from' => $timeFrom ?? '', 'to' => $timeTo ?? ''];
+$isFiltered    = $activeLevels !== [] || $searchQuery !== '' || $filters['from'] !== '' || $filters['to'] !== '';
 
 include __DIR__ . '/log_viewer_head.php';
 ?>
@@ -212,6 +226,9 @@ include __DIR__ . '/log_viewer_head.php';
             <div class="border-bottom px-3 py-2 d-flex align-items-center gap-2 flex-wrap bg-body-tertiary">
                 <span class="fw-semibold text-truncate"><?= esc($filename) ?></span>
                 <div class="ms-auto d-flex gap-2 flex-shrink-0">
+                    <button class="btn btn-sm btn-outline-secondary" id="btn-copy-page" title="Copy entries on this page as JSON">
+                        <i class="bi bi-clipboard-data"></i>
+                    </button>
                     <button class="btn btn-sm btn-outline-secondary" id="btn-refresh" title="Refresh entries">
                         <i class="bi bi-arrow-clockwise" id="refresh-icon"></i>
                     </button>
@@ -239,7 +256,7 @@ include __DIR__ . '/log_viewer_head.php';
             <!-- Filter bar -->
             <div class="border-bottom px-3 py-3 d-flex align-items-center gap-3 flex-wrap">
                 <div class="d-flex flex-wrap gap-1" id="lv-levels">
-                    <a href="<?= esc(lvUrl($basePath, $filename, 1, [], $searchQuery)) ?>"
+                    <a href="<?= esc(lvUrl($basePath, $filename, 1, ['levels' => []] + $filters)) ?>"
                        class="btn btn-sm btn-outline-secondary <?= $allActive ? 'active' : '' ?> lv-level-btn">
                         <i class="bi <?= $allActive ? 'bi-check2-square' : 'bi-square' ?> me-1"></i>All
                         <small class="ms-1 opacity-75"><?= array_sum($levelCounts) ?></small>
@@ -247,14 +264,22 @@ include __DIR__ . '/log_viewer_head.php';
                     <?php foreach ($presentLevels as $level):
                         $levelActive = $allActive || in_array($level, $activeLevels, true);
                         ?>
-                        <a href="<?= esc(lvToggleLevelUrl($basePath, $filename, $level, $activeLevels, $searchQuery)) ?>"
+                        <a href="<?= esc(lvToggleLevelUrl($basePath, $filename, $level, $filters)) ?>"
                            class="btn btn-sm btn-outline-<?= levelColor($level) ?> <?= $levelActive ? 'active' : '' ?> lv-level-btn">
                             <i class="bi <?= $levelActive ? 'bi-check2-square' : 'bi-square' ?> me-1"></i><?= ucfirst($level) ?>
                             <small class="ms-1 opacity-75"><?= $levelCounts[$level] ?></small>
                         </a>
                     <?php endforeach ?>
                 </div>
-                <input type="search" class="form-control form-control-sm ms-auto" id="lv-search"
+                <div class="d-flex align-items-center gap-1 ms-auto" title="Time range (inclusive)">
+                    <i class="bi bi-clock text-body-secondary"></i>
+                    <input type="time" class="form-control form-control-sm lv-time" id="lv-time-from" data-param="from"
+                           value="<?= esc($filters['from']) ?>" aria-label="From time" style="width:auto">
+                    <span class="text-body-secondary">–</span>
+                    <input type="time" class="form-control form-control-sm lv-time" id="lv-time-to" data-param="to"
+                           value="<?= esc($filters['to']) ?>" aria-label="To time" style="width:auto">
+                </div>
+                <input type="search" class="form-control form-control-sm" id="lv-search"
                        placeholder="Search (regex supported!)" style="max-width:300px"
                        value="<?= esc($searchQuery) ?>">
             </div>
@@ -393,7 +418,7 @@ include __DIR__ . '/log_viewer_head.php';
 
             <!-- Pagination bar -->
             <div id="lv-pagination-bar">
-            <?php if ($totalPages > 1 || $activeLevels !== [] || $searchQuery !== ''): ?>
+            <?php if ($totalPages > 1 || $isFiltered): ?>
                 <div class="border-top px-3 py-2 d-flex align-items-center gap-2 bg-body-tertiary flex-shrink-0">
                     <small class="text-body-secondary">
                         <?php if ($total === 0): ?>
@@ -401,19 +426,19 @@ include __DIR__ . '/log_viewer_head.php';
                         <?php else: ?>
                             <?= number_format(($page - 1) * $perPage + 1) ?>–<?= number_format(min($page * $perPage, $total)) ?>
                             of <?= number_format($total) ?>
-                            <?php if ($activeLevels !== [] || $searchQuery !== ''): ?>
+                            <?php if ($isFiltered): ?>
                                 <span class="opacity-50">(filtered)</span>
                             <?php endif ?>
                         <?php endif ?>
                     </small>
                     <?php if ($totalPages > 1): ?>
                         <div class="ms-auto d-flex align-items-center gap-1">
-                            <a href="<?= esc(lvUrl($basePath, $filename, $page - 1, $activeLevels, $searchQuery)) ?>"
+                            <a href="<?= esc(lvUrl($basePath, $filename, $page - 1, $filters)) ?>"
                                class="btn btn-sm btn-outline-secondary lv-page-btn <?= $page <= 1 ? 'disabled' : '' ?>">
                                 <i class="bi bi-chevron-left"></i>
                             </a>
                             <small class="text-body-secondary px-1"><?= $page ?> / <?= $totalPages ?></small>
-                            <a href="<?= esc(lvUrl($basePath, $filename, $page + 1, $activeLevels, $searchQuery)) ?>"
+                            <a href="<?= esc(lvUrl($basePath, $filename, $page + 1, $filters)) ?>"
                                class="btn btn-sm btn-outline-secondary lv-page-btn <?= $page >= $totalPages ? 'disabled' : '' ?>">
                                 <i class="bi bi-chevron-right"></i>
                             </a>

@@ -103,12 +103,26 @@ class LogViewerService
      *
      *   user.email=.*@company\.com session.role=admin
      *
+     * $from / $to restrict entries to a time-of-day window ("HH:MM", both
+     * inclusive to the minute). Malformed values are ignored.
+     *
      * @param list<string> $levels
      *
      * @return list<array>
      */
-    public function filterEntries(array $entries, array $levels, string $query): array
+    public function filterEntries(array $entries, array $levels, string $query, string $from = '', string $to = ''): array
     {
+        $from = $this->normalizeTime($from);
+        $to   = $this->normalizeTime($to);
+
+        if ($from !== null || $to !== null) {
+            $entries = array_values(array_filter($entries, static function ($e) use ($from, $to) {
+                $time = substr($e['datetime'], 11, 5);
+
+                return ($from === null || $time >= $from) && ($to === null || $time <= $to);
+            }));
+        }
+
         if ($levels !== []) {
             $entries = array_values(array_filter(
                 $entries,
@@ -136,6 +150,14 @@ class LogViewerService
         }
 
         return $entries;
+    }
+
+    /**
+     * Returns a valid "HH:MM" time, or null when empty or malformed.
+     */
+    public function normalizeTime(string $time): ?string
+    {
+        return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time) ? $time : null;
     }
 
     /**

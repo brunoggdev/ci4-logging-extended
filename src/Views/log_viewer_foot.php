@@ -139,13 +139,17 @@
     var searchInput = document.getElementById('lv-search');
     var searchTimer = null;
 
+    // Sets (or clears) a query param, resets pagination and navigates.
+    function navigateWithParam(name, value) {
+        var url = new URL(location.href);
+        if (value) { url.searchParams.set(name, value); } else { url.searchParams.delete(name); }
+        url.searchParams.delete('page');
+        lvNavigate(url.toString());
+    }
+
     if (searchInput) {
         function doSearch() {
-            var url = new URL(location.href);
-            var q   = searchInput.value.trim();
-            if (q) { url.searchParams.set('q', q); } else { url.searchParams.delete('q'); }
-            url.searchParams.delete('page');
-            lvNavigate(url.toString());
+            navigateWithParam('q', searchInput.value.trim());
         }
 
         searchInput.addEventListener('input', function () {
@@ -160,6 +164,14 @@
             doSearch();
         });
     }
+
+    // ── Time range filter ─────────────────────────────────────────────────
+    // "change" fires once a full HH:MM is entered or the field is cleared.
+    document.querySelectorAll('.lv-time').forEach(function (input) {
+        input.addEventListener('change', function () {
+            navigateWithParam(input.dataset.param, input.value);
+        });
+    });
 
     // ── Partial navigation (swap regions without full reload) ─────────────
     // Swaps #log-tbody, #lv-levels, #lv-pagination-bar and syncs the search
@@ -347,10 +359,11 @@
         });
     }
 
-    function flashIcon(btn, idleClass) {
-        var icon = btn.querySelector('.bi');
-        icon.className = 'bi bi-check2 fs-6';
-        setTimeout(function () { icon.className = 'bi ' + idleClass + ' fs-6'; }, 1500);
+    function flashIcon(btn, idleClass, size) {
+        var icon   = btn.querySelector('.bi');
+        var suffix = size === undefined ? ' fs-6' : size;
+        icon.className = 'bi bi-check2' + suffix;
+        setTimeout(function () { icon.className = 'bi ' + idleClass + suffix; }, 1500);
     }
 
     document.addEventListener('click', function (e) {
@@ -358,6 +371,14 @@
         if (share) {
             var url = location.origin + location.pathname + location.search + '#' + share.dataset.anchor;
             copyText(url).then(function () { flashIcon(share, 'bi-link-45deg'); });
+            return;
+        }
+
+        var copyPage = e.target.closest('#btn-copy-page');
+        if (copyPage) {
+            var entries = Array.from(document.querySelectorAll('#log-tbody .lv-row[data-entry]'))
+                .map(function (tr) { return JSON.parse(tr.dataset.entry); });
+            copyText(JSON.stringify(entries, null, 2)).then(function () { flashIcon(copyPage, 'bi-clipboard-data', ''); });
             return;
         }
 
